@@ -1,0 +1,14 @@
+# Never copy local (macOS-native) modules or local state into the Linux image.
+node_modules
+dist
+.astro
+data
+.git
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vercel
+.claude
+.atl
