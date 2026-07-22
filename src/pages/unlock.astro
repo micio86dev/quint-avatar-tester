@@ -1,0 +1,141 @@
+---
+// Access gate page: a centered modal that posts the password to /api/auth/unlock and,
+// on success, returns to the originally requested path (`next`).
+export const prerender = false;
+
+const nextParam = Astro.url.searchParams.get('next') || '/';
+// Only allow same-site relative redirects to avoid an open-redirect via ?next=.
+const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Locked — quint-avatar-tester</title>
+  </head>
+  <body>
+    <main class="gate">
+      <form id="unlock-form" class="modal" autocomplete="on">
+        <h1>Locked</h1>
+        <p class="hint">Enter the password to continue.</p>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          autocomplete="current-password"
+          placeholder="Password"
+          required
+          autofocus
+        />
+        <button type="submit">Unlock</button>
+        <p class="error" id="error" role="alert" hidden>Wrong password</p>
+      </form>
+    </main>
+
+    <script is:inline define:vars={{ next }}>
+      const form = document.getElementById('unlock-form');
+      const input = document.getElementById('password');
+      const error = document.getElementById('error');
+      const button = form.querySelector('button');
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.hidden = true;
+        button.disabled = true;
+        try {
+          const res = await fetch('/api/auth/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: input.value }),
+          });
+          if (res.ok) {
+            window.location.href = next;
+            return;
+          }
+          error.hidden = false;
+          input.value = '';
+          input.focus();
+        } catch {
+          error.hidden = false;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      .gate {
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        background: #0f1115;
+      }
+      .modal {
+        width: 100%;
+        max-width: 22rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+        padding: 2rem 1.75rem;
+        border-radius: 14px;
+        background: #191c22;
+        border: 1px solid #2a2f3a;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.3rem;
+        color: #f3f5f9;
+      }
+      .hint {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #9aa3b2;
+      }
+      input {
+        padding: 0.7rem 0.85rem;
+        font-size: 1rem;
+        border-radius: 9px;
+        border: 1px solid #333a47;
+        background: #0f1115;
+        color: #f3f5f9;
+      }
+      input:focus {
+        outline: 2px solid #4c7dff;
+        border-color: transparent;
+      }
+      button {
+        padding: 0.7rem 0.85rem;
+        font-size: 1rem;
+        font-weight: 600;
+        border: 0;
+        border-radius: 9px;
+        background: #4c7dff;
+        color: #fff;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .error {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #ff6b6b;
+      }
+    </style>
+  </body>
+</html>
