@@ -1,7 +1,13 @@
 ---
 // Access gate page: a centered modal that posts the password to /api/auth/unlock and,
 // on success, returns to the originally requested path (`next`).
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../lib/i18n';
 export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
 
 const nextParam = Astro.url.searchParams.get('next') || '/';
 // Only allow same-site relative redirects to avoid an open-redirect via ?next=.
@@ -9,30 +15,45 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={locale}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Locked — quint-avatar-tester</title>
+    <title>{t(locale, 'gate.title')} — quint-avatar-tester</title>
   </head>
   <body>
+    <div class="lang-switch" role="group" aria-label={t(locale, 'common.language')}>
+      <button type="button" class="lang" data-lang="it" aria-pressed={locale === 'it'}>IT</button>
+      <button type="button" class="lang" data-lang="en" aria-pressed={locale === 'en'}>EN</button>
+    </div>
     <main class="gate">
       <form id="unlock-form" class="modal" autocomplete="on">
-        <h1>Locked</h1>
-        <p class="hint">Enter the password to continue.</p>
+        <h1>{t(locale, 'gate.title')}</h1>
+        <p class="hint">{t(locale, 'gate.hint')}</p>
         <input
           type="password"
           id="password"
           name="password"
           autocomplete="current-password"
-          placeholder="Password"
+          placeholder={t(locale, 'gate.placeholder')}
           required
           autofocus
         />
-        <button type="submit">Unlock</button>
-        <p class="error" id="error" role="alert" hidden>Wrong password</p>
+        <button type="submit">{t(locale, 'gate.unlock')}</button>
+        <p class="error" id="error" role="alert" hidden>{t(locale, 'gate.wrong')}</p>
       </form>
     </main>
+
+    <script is:inline>
+      // Language switcher: set the cookie and reload so SSR re-renders in the new locale.
+      for (const el of document.querySelectorAll('.lang')) {
+        el.addEventListener('click', () => {
+          const lang = el.getAttribute('data-lang');
+          document.cookie = `lang=${lang}; path=/; max-age=31536000; samesite=lax`;
+          location.reload();
+        });
+      }
+    </script>
 
     <script is:inline define:vars={{ next }}>
       const form = document.getElementById('unlock-form');
@@ -135,6 +156,31 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
         margin: 0;
         font-size: 0.85rem;
         color: #ff6b6b;
+      }
+      .lang-switch {
+        position: fixed;
+        top: 14px;
+        right: 16px;
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        background: #191c22;
+        border: 1px solid #2a2f3a;
+        border-radius: 999px;
+      }
+      .lang {
+        padding: 4px 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #9aa3b2;
+        background: transparent;
+        border: 0;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .lang[aria-pressed='true'] {
+        color: #fff;
+        background: #4c7dff;
       }
     </style>
   </body>

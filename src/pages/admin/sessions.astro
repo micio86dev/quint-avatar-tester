@@ -1,0 +1,113 @@
+---
+// Sessions archive. The consumption/data overview the operator relies on: every
+// recorded interview with its provider, context (prompt/template), start time,
+// duration, estimated cost, turn count and status. Duration and cost are derived at
+// render time with the SAME formula as /review/[id], never a stored column.
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../../lib/i18n';
+import { listSessions } from '../../lib/db';
+import { rates } from '../../lib/pricing';
+
+export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
+
+const sessions = listSessions();
+
+const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
+
+// Duration (minutes) + estimated cost per the review-page formula. Ongoing sessions
+// (no ended_at) have no measurable duration/cost yet.
+function derive(s: (typeof sessions)[number]): { durationMin: number; costUsd: number; ended: boolean } {
+  if (!s.ended_at) return { durationMin: 0, costUsd: 0, ended: false };
+  const durationMin =
+    (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 60_000;
+  const costUsd =
+    s.provider === 'heygen'
+      ? durationMin * rates.heygenCreditsPerMin * rates.heygenUsdPerCredit
+      : Math.max(0.5, Math.ceil(durationMin * 600) / 600) * rates.tavusUsdPerMin;
+  return { durationMin, costUsd, ended: true };
+}
+
+const rows = sessions.map((s) => ({ session: s, ...derive(s) }));
+
+// Map the ended_reason enum to a localized label; fall back to the raw value if unknown.
+const STATUS_KEYS = new Set(['completed', 'timeout', 'user_stop', 'error']);
+function statusLabel(reason: string | null | undefined): string {
+  if (!reason) return '—';
+  return STATUS_KEYS.has(reason) ? t(locale, `session.status.${reason}`) : reason;
+}
+---
+
+<AdminLayout section="sessions" title={t(locale, 'admin.sessions.title')}>
+  <div class="mb-8">
+    <h1 class="text-2xl font-semibold tracking-tight">{t(locale, 'admin.sessions.title')}</h1>
+    <p class="mt-1 text-sm text-muted">{t(locale, 'admin.sessions.subtitle')}</p>
+  </div>
+
+  {
+    rows.length === 0 ? (
+      <div class="card px-6 py-16 text-center">
+        <p class="text-base font-medium text-fg">{t(locale, 'admin.sessions.empty.title')}</p>
+        <p class="mx-auto mt-2 max-w-md text-sm text-muted">{t(locale, 'admin.sessions.empty.hint')}</p>
+      </div>
+    ) : (
+      <section class="card overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-border text-left text-xs uppercase tracking-wide text-faint">
+              <th class="px-4 py-3 font-medium">{t(locale, 'admin.sessions.col.id')}</th>
+              <th class="px-4 py-3 font-medium">{t(locale, 'admin.sessions.col.provider')}</th>
+              <th class="px-4 py-3 font-medium">{t(locale, 'admin.sessions.col.context')}</th>
+              <th class="px-4 py-3 font-medium">{t(locale, 'admin.sessions.col.started')}</th>
+              <th class="px-4 py-3 text-right font-medium">{t(locale, 'admin.sessions.col.duration')}</th>
+              <th class="px-4 py-3 text-right font-medium">{t(locale, 'admin.sessions.col.cost')}</th>
+              <th class="px-4 py-3 text-right font-medium">{t(locale, 'admin.sessions.col.turns')}</th>
+              <th class="px-4 py-3 font-medium">{t(locale, 'admin.sessions.col.status')}</th>
+              <th class="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ session: s, durationMin, costUsd, ended }) => (
+              <tr class="border-b border-border last:border-0 hover:bg-panel">
+                <td class="px-4 py-3 font-medium text-fg tabular-nums">#{s.id}</td>
+                <td class="px-4 py-3">
+                  <span class="badge badge-off uppercase">{s.provider}</span>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="block text-fg">{s.prompt_title ?? <span class="text-faint">—</span>}</span>
+                  <span class="block text-xs text-muted">{s.template_name ?? <span class="text-faint">—</span>}</span>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-muted tabular-nums">
+                  {dateFmt.format(new Date(s.started_at))}
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums text-muted">
+                  {ended ? t(locale, 'admin.sessions.unit.min', { n: durationMin.toFixed(1) }) : <span class="text-faint">—</span>}
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums">
+                  {ended ? <span class="text-fg">&asymp; ${costUsd.toFixed(2)}</span> : <span class="text-faint">—</span>}
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums text-muted">{s.utterance_count}</td>
+                <td class="px-4 py-3">
+                  {s.ended_at ? (
+                    <span class="text-muted">{statusLabel(s.ended_reason)}</span>
+                  ) : (
+                    <span class="badge badge-on">{t(locale, 'admin.sessions.status.ongoing')}</span>
+                  )}
+                </td>
+                <td class="px-4 py-3 text-right whitespace-nowrap">
+                  <a href={`/review/${s.id}`} class="btn btn-ghost btn-sm">
+                    {t(locale, 'admin.sessions.review')}
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    )
+  }
+</AdminLayout>

@@ -1,0 +1,89 @@
+---
+// Shared chrome for every /admin page: theme, locale, header with section nav and an
+// IT/EN switcher. Pages pass their active section so the nav can highlight it.
+import '../styles/app.css';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../lib/i18n';
+
+interface Props {
+  section?: 'prompts' | 'questions' | 'templates' | 'sessions';
+  title?: string;
+}
+const { section, title } = Astro.props;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
+
+const nav = [
+  { key: 'prompts', href: '/admin/prompts' },
+  { key: 'questions', href: '/admin/questions' },
+  { key: 'templates', href: '/admin/templates' },
+  { key: 'sessions', href: '/admin/sessions' },
+] as const;
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title ? `${title} · ` : ''}{t(locale, 'admin.title')}</title>
+  </head>
+  <body class="min-h-dvh bg-bg text-fg">
+    <header class="border-b border-border bg-panel/80 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
+        <a href="/admin" class="flex items-baseline gap-2 whitespace-nowrap">
+          <span class="text-[0.95rem] font-semibold tracking-tight">quint-avatar-tester</span>
+          <span class="text-xs text-faint">{t(locale, 'admin.title')}</span>
+        </a>
+
+        <nav class="flex items-center gap-1 text-sm">
+          {
+            nav.map((item) => (
+              <a
+                href={item.href}
+                aria-current={section === item.key ? 'page' : undefined}
+                class:list={[
+                  'rounded-md px-3 py-1.5 font-medium transition-colors',
+                  section === item.key
+                    ? 'bg-accent-soft text-accent'
+                    : 'text-muted hover:bg-surface hover:text-fg',
+                ]}
+              >
+                {t(locale, `admin.nav.${item.key}`)}
+              </a>
+            ))
+          }
+        </nav>
+
+        <div class="ml-auto flex items-center gap-3">
+          <div
+            class="flex items-center rounded-md border border-border bg-surface p-0.5 text-xs font-medium"
+            role="group"
+            aria-label={t(locale, 'common.language')}
+          >
+            <button data-lang="it" class:list={['lang-btn rounded px-2 py-1', locale === 'it' ? 'bg-accent text-accent-fg' : 'text-muted']}>IT</button>
+            <button data-lang="en" class:list={['lang-btn rounded px-2 py-1', locale === 'en' ? 'bg-accent text-accent-fg' : 'text-muted']}>EN</button>
+          </div>
+          <a href="/" class="text-sm text-muted hover:text-fg">{t(locale, 'admin.nav.home')}</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-6 py-8">
+      <slot />
+    </main>
+
+    <script is:inline>
+      // Locale switch: set the cookie and reload so SSR re-renders in the chosen language.
+      document.querySelectorAll('.lang-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          const lang = b.getAttribute('data-lang');
+          document.cookie = `lang=${lang}; path=/; max-age=31536000; samesite=lax`;
+          location.reload();
+        });
+      });
+    </script>
+  </body>
+</html>

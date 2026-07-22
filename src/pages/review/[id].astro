@@ -5,6 +5,12 @@ import { computeIntegritySummary, getIntegrityEvents, getSession, getSnapshots, 
 import type { SnapshotRow } from '../../lib/db';
 import { rates } from '../../lib/pricing';
 import { INTEGRITY_LABELS, type IntegrityType } from '../../lib/proctor-config';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../../lib/i18n';
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
 
 const id = Number(Astro.params.id);
 const session = Number.isInteger(id) ? getSession(id) : undefined;
@@ -26,11 +32,18 @@ if (session?.ended_at) {
 const integrityEvents = session ? getIntegrityEvents(id) : [];
 const integrity = session ? computeIntegritySummary(id) : null;
 const snapshots: SnapshotRow[] = session ? getSnapshots(id) : [];
-const BAND_LABEL: Record<string, string> = { low: 'basso', medium: 'medio', high: 'alto' };
+const BAND_LABEL: Record<string, string> = {
+  low: t(locale, 'review.band.low'),
+  medium: t(locale, 'review.band.medium'),
+  high: t(locale, 'review.band.high'),
+};
+
+const timeFmt = new Intl.DateTimeFormat(locale, { timeStyle: 'medium' });
+const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
 
 function eventTime(ts: string): string {
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString('it-IT');
+  return Number.isNaN(d.getTime()) ? ts : timeFmt.format(d);
 }
 function eventDetail(type: string, metaJson: string | null): string {
   if (!metaJson) return '';
@@ -42,32 +55,34 @@ function eventDetail(type: string, metaJson: string | null): string {
   }
   const parts: string[] = [];
   if (typeof meta.durationMs === 'number') parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
-  if (type === 'multiple_faces' && typeof meta.count === 'number') parts.push(`${meta.count} volti`);
-  if (type === 'looking_away' && typeof meta.yaw === 'number') parts.push(`yaw ${meta.yaw}°`);
+  if (type === 'multiple_faces' && typeof meta.count === 'number')
+    parts.push(t(locale, 'review.detail.faces', { n: meta.count }));
+  if (type === 'looking_away' && typeof meta.yaw === 'number')
+    parts.push(t(locale, 'review.detail.yaw', { n: meta.yaw }));
   return parts.join(' · ');
 }
 ---
 
 <!doctype html>
-<html lang="it">
+<html lang={locale}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Review — Interview #{id}</title>
+    <title>{t(locale, 'review.title', { id })}</title>
   </head>
   <body>
     <main>
-      {!session && <p class="empty">Session #{id} not found.</p>}
+      {!session && <p class="empty">{t(locale, 'review.not_found', { id })}</p>}
       {
         session && (
           <>
             <header>
-              <h1>Interview #{session.id}</h1>
+              <h1>{t(locale, 'review.heading', { id: session.id })}</h1>
               <p class="meta">
                 <span class="badge">{session.provider}</span>
                 {session.ended_reason && <span>· {session.ended_reason}</span>}
-                <span>· started {session.started_at}</span>
-                {session.ended_at && <span>· ended {session.ended_at}</span>}
+                <span>· {t(locale, 'review.started', { ts: dateFmt.format(new Date(session.started_at)) })}</span>
+                {session.ended_at && <span>· {t(locale, 'review.ended', { ts: dateFmt.format(new Date(session.ended_at)) })}</span>}
                 {session.ended_at && (
                   <span class="cost">
                     · ≈ ${costUsd.toFixed(2)} ({durationMin.toFixed(1)} min)
@@ -79,13 +94,13 @@ function eventDetail(type: string, metaJson: string | null): string {
             {integrity && (
               <section class="integrity">
                 <div class="integrity-head">
-                  <h2>Integrità</h2>
+                  <h2>{t(locale, 'review.integrity.title')}</h2>
                   <span class={`band band-${integrity.band}`}>
-                    rischio {BAND_LABEL[integrity.band]} · {integrity.score}
+                    {t(locale, 'review.integrity.risk', { band: BAND_LABEL[integrity.band], score: integrity.score })}
                   </span>
                 </div>
                 {integrity.total === 0 ? (
-                  <p class="empty">Nessun segnale registrato.</p>
+                  <p class="empty">{t(locale, 'review.integrity.none')}</p>
                 ) : (
                   <ol class="events">
                     {integrityEvents.map((e) => (
@@ -104,7 +119,7 @@ function eventDetail(type: string, metaJson: string | null): string {
 
             {snapshots.length > 0 && (
               <section class="snapshots">
-                <h2>Snapshot webcam ({snapshots.length})</h2>
+                <h2>{t(locale, 'review.snapshots.title', { n: snapshots.length })}</h2>
                 <div class="snap-grid">
                   {snapshots.map((s) => (
                     <div class="snap-item">
@@ -116,11 +131,11 @@ function eventDetail(type: string, metaJson: string | null): string {
               </section>
             )}
 
-            {utterances.length === 0 && <p class="empty">No utterances stored.</p>}
+            {utterances.length === 0 && <p class="empty">{t(locale, 'review.transcript.empty')}</p>}
             <ol class="transcript">
               {utterances.map((u) => (
                 <li class={`turn ${u.role}`}>
-                  <span class="who">{u.role === 'avatar' ? 'Alessandra' : 'Tu'}</span>
+                  <span class="who">{u.role === 'avatar' ? t(locale, 'review.speaker.avatar') : t(locale, 'review.speaker.you')}</span>
                   <span class="text">{u.text}</span>
                 </li>
               ))}

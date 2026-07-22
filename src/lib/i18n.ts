@@ -1,140 +1,442 @@
-// Internationalisation — single source of truth for UI strings.
-// Add a new locale by extending the `Locale` union and adding its entry to `locales`.
-// Currently only Italian is shipped; the structure is in place for future additions.
+// Internationalisation — single source of truth for UI strings (IT / EN).
+// Pure module: safe to import from both SSR (.astro) and client scripts.
+// Add page-specific keys to BOTH `it` and `en` following the existing dotted pattern.
 
-export type Locale = 'it';
+export type Locale = 'it' | 'en';
+export const LOCALES: readonly Locale[] = ['it', 'en'];
 export const DEFAULT_LOCALE: Locale = 'it';
+export const LOCALE_COOKIE = 'lang';
 
-const it = {
-  // ── Navigation ────────────────────────────────────────────────────────────
-  'nav.back_home': '← Home',
-  'nav.back_archive': '← Archivio',
-
-  // ── Admin list ────────────────────────────────────────────────────────────
-  'admin.list.title': 'Archivio Interviste',
-  'admin.list.empty': 'Nessuna intervista registrata.',
-  'admin.list.col.candidate': 'Candidato',
-  'admin.list.col.code': 'Codice',
-  'admin.list.col.progress': 'Progresso',
-  'admin.list.col.provider': 'Provider',
-  'admin.list.col.cost': 'Costo (stimato)',
-  'admin.list.col.last_activity': 'Ultima attività',
-  'admin.list.action.detail': 'Dettaglio →',
-
-  // ── Admin detail ──────────────────────────────────────────────────────────
-  'admin.detail.unnamed': 'Candidato senza nome',
-  'admin.detail.stat.questions': 'Domande',
-  'admin.detail.stat.total_duration': 'Durata totale',
-  'admin.detail.stat.total_cost': 'Costo totale',
-  'admin.detail.stat.integrity': 'Segnali integrità',
-  'admin.detail.stat.registered': 'Registrato',
-
-  // ── Progress status ───────────────────────────────────────────────────────
-  'status.pending': 'In attesa',
-  'status.completed': 'Completata',
-  'status.timeout': 'Timeout',
-  'status.skipped': 'Saltata',
-
-  // ── Session meta bar ──────────────────────────────────────────────────────
-  'session.started': 'Iniziata',
-  'session.ended': 'Terminata',
-  'session.id_prefix': 'Sessione #',
-  'session.estimated': 'stimato',
-  'session.actual_duration': 'effettivo',
-  'session.credits': 'crediti',
-  'session.min': 'min',
-  'session.no_session': 'Nessuna sessione avviata per questa domanda.',
-
-  // ── Provider data block ───────────────────────────────────────────────────
-  'provider.updated': 'aggiornato',
-  'provider.refresh': '↻ Aggiorna dati',
-  'provider.load': '↻ Carica dati provider',
-  'provider.loading': 'Caricamento…',
-  'provider.no_data': 'Dati provider non ancora disponibili.',
-  'provider.no_data_hint': 'Usa "Carica dati provider" per recuperarli.',
-
-  // Tavus
-  'provider.tavus.title': 'Dati Tavus',
-  'provider.tavus.perception_label': 'Analisi visuale AI (Tavus Raven)',
-  'provider.tavus.recording': 'Registrazione',
-  'provider.tavus.transcript': 'Trascrizione Tavus con timing',
-
-  // HeyGen
-  'provider.heygen.title': 'Dati HeyGen (effettivi)',
-  'provider.heygen.credits': 'Crediti consumati',
-  'provider.heygen.duration': 'Durata effettiva',
-  'provider.heygen.cost': 'Costo effettivo',
-  'provider.heygen.end_reason': 'Fine sessione',
-  'provider.heygen.mode': 'Modalità',
-
-  // ── Integrity ─────────────────────────────────────────────────────────────
-  'integrity.title': 'Integrità',
-  'integrity.risk': 'rischio',
-  'integrity.band.low': 'basso',
-  'integrity.band.medium': 'medio',
-  'integrity.band.high': 'alto',
-  'integrity.clean': '✓ Nessun segnale di integrità registrato',
-
-  // ── Answer summary ────────────────────────────────────────────────────────
-  'answer.summary.title': 'Sintesi risposta',
-
-  // ── Snapshots ─────────────────────────────────────────────────────────────
-  'snapshots.title': 'Snapshot webcam',
-  'snapshots.legend.event': 'su evento',
-  'snapshots.legend.periodic': 'periodico',
-
-  // ── Transcript ────────────────────────────────────────────────────────────
-  'transcript.title': 'Trascrizione',
-  'transcript.turns': 'turni',
-  'transcript.empty': 'Nessuna trascrizione disponibile.',
-
-  // ── Speakers ─────────────────────────────────────────────────────────────
-  'speaker.avatar': 'Alessandra',
-  'speaker.candidate': 'Candidato',
-
-  // ── Fallback for missing dates ────────────────────────────────────────────
-  'time.unknown': '—',
-} as const;
-
-// Derive the key union from the `it` object so adding/removing keys is automatically reflected.
-export type I18nKey = keyof typeof it;
-
-const locales: Record<Locale, Record<string, string>> = { it };
-
-export function t(key: I18nKey, locale: Locale = DEFAULT_LOCALE): string {
-  return locales[locale][key] ?? key;
+export function isLocale(v: unknown): v is Locale {
+  return v === 'it' || v === 'en';
 }
 
-// ── Date/time helpers ─────────────────────────────────────────────────────────
-// All timestamps are stored as UTC ISO-8601; these helpers convert to the target
-// timezone for display. Passing `null` timezone falls back to the runtime's local TZ
-// (usually UTC in a server environment — prefer always passing a known TZ).
-
-export function formatDateTime(
-  iso: string | null | undefined,
-  timezone?: string | null,
-  locale: Locale = DEFAULT_LOCALE,
-): string {
-  if (!iso) return t('time.unknown', locale);
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('it-IT', {
-    timeZone: timezone ?? undefined,
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+// Resolve the active locale: explicit cookie wins, else negotiate Accept-Language,
+// else the default. Kept dependency-free so it runs anywhere.
+export function resolveLocale(cookieValue?: string | null, acceptLanguage?: string | null): Locale {
+  if (isLocale(cookieValue)) return cookieValue;
+  const header = (acceptLanguage ?? '').toLowerCase();
+  // First language tag that names one of our locales wins.
+  for (const part of header.split(',')) {
+    const tag = part.trim().split(';')[0];
+    if (tag.startsWith('en')) return 'en';
+    if (tag.startsWith('it')) return 'it';
+  }
+  return DEFAULT_LOCALE;
 }
 
-export function formatTime(
-  iso: string | null | undefined,
-  timezone?: string | null,
-  locale: Locale = DEFAULT_LOCALE,
-): string {
-  if (!iso) return t('time.unknown', locale);
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString('it-IT', { timeZone: timezone ?? undefined });
+type Dict = Record<string, string>;
+
+const it: Dict = {
+  // Common actions
+  'action.save': 'Salva',
+  'action.cancel': 'Annulla',
+  'action.create': 'Crea',
+  'action.edit': 'Modifica',
+  'action.delete': 'Elimina',
+  'action.back': 'Indietro',
+  'action.confirm_delete': 'Eliminare definitivamente?',
+  'action.loading': 'Caricamento…',
+  'action.saving': 'Salvataggio…',
+
+  // Common states
+  'state.enabled': 'Attivo',
+  'state.disabled': 'Disattivato',
+  'state.empty': 'Niente da mostrare.',
+  'common.language': 'Lingua',
+
+  // Access gate
+  'gate.title': 'Accesso protetto',
+  'gate.hint': 'Inserisci la password per continuare.',
+  'gate.placeholder': 'Password',
+  'gate.unlock': 'Sblocca',
+  'gate.wrong': 'Password errata',
+
+  // Admin navigation
+  'admin.title': 'Amministrazione',
+  'admin.subtitle': 'Gestisci prompt, domande, template e rivedi le sessioni.',
+  'admin.nav.prompts': 'Prompt',
+  'admin.nav.questions': 'Domande',
+  'admin.nav.templates': 'Template',
+  'admin.nav.sessions': 'Sessioni',
+  'admin.nav.home': 'Home',
+
+  // Admin hub
+  'admin.hub.count': '{n} elementi',
+  'admin.hub.count_one': '1 elemento',
+  'admin.hub.count_zero': 'Nessun elemento',
+  'admin.hub.open': 'Apri',
+  'admin.hub.prompts.desc': 'Prompt persona e script: titolo, testo, saluto, lingua, note.',
+  'admin.hub.questions.desc': 'La banca domande dell’intervista. Attiva/disattiva e modifica le domande.',
+  'admin.hub.templates.desc': 'Ricette d’esperimento: domande ordinate più configurazione provider HeyGen / Tavus.',
+  'admin.hub.sessions.desc': 'Archivio delle interviste registrate con durata, costo stimato e stato.',
+
+  // Prompts page
+  'admin.prompts.list_title': 'Tutti i prompt',
+  'admin.prompts.new': '+ Nuovo prompt',
+  'admin.prompts.col.title': 'Titolo',
+  'admin.prompts.col.language': 'Lingua',
+  'admin.prompts.col.updated': 'Aggiornato',
+  'admin.prompts.empty.title': 'Ancora nessun prompt',
+  'admin.prompts.empty.hint': 'Crea il primo prompt persona per definire come si presenta e parla l’avatar.',
+  'admin.prompts.editor.new': 'Nuovo prompt',
+  'admin.prompts.editor.edit': 'Modifica prompt #{id}',
+  'admin.prompts.field.title': 'Titolo',
+  'admin.prompts.field.body': 'Testo',
+  'admin.prompts.field.body.hint': 'Le istruzioni di sistema che guidano la persona dell’avatar.',
+  'admin.prompts.field.greeting': 'Saluto',
+  'admin.prompts.field.greeting.hint': 'Frase di apertura pronunciata all’inizio dell’intervista.',
+  'admin.prompts.field.language': 'Lingua',
+  'admin.prompts.field.notes': 'Note',
+  'admin.prompts.confirm_delete': 'Eliminare il prompt “{title}”?',
+  'admin.prompts.msg.created': 'Creato.',
+  'admin.prompts.msg.saved': 'Salvato.',
+  'admin.prompts.msg.deleted': 'Eliminato.',
+
+  // Questions page
+  'admin.questions.list_title': 'Banca domande',
+  'admin.questions.new': '+ Nuova domanda',
+  'admin.questions.col.name': 'Nome',
+  'admin.questions.col.status': 'Stato',
+  'admin.questions.col.objective': 'Obiettivo',
+  'admin.questions.delete_hint': 'Solo le domande disattivate possono essere eliminate.',
+  'admin.questions.empty.title': 'Ancora nessuna domanda',
+  'admin.questions.empty.hint': 'Aggiungi la prima domanda alla banca; poi potrai comporla nei template.',
+  'admin.questions.editor.new': 'Nuova domanda',
+  'admin.questions.editor.edit': 'Modifica domanda #{id}',
+  'admin.questions.field.name': 'Nome',
+  'admin.questions.field.text': 'Testo',
+  'admin.questions.field.text.hint': 'La domanda così come viene posta al candidato.',
+  'admin.questions.field.objective': 'Obiettivo',
+  'admin.questions.field.objective.hint': 'Cosa mira a valutare questa domanda (uso interno).',
+  'admin.questions.action.enable': 'Attiva',
+  'admin.questions.action.disable': 'Disattiva',
+  'admin.questions.confirm_delete': 'Eliminare la domanda “{name}”?',
+  'admin.questions.msg.created': 'Creata.',
+  'admin.questions.msg.saved': 'Salvata.',
+  'admin.questions.msg.deleted': 'Eliminata.',
+  'admin.questions.msg.enabled': 'Attivata.',
+  'admin.questions.msg.disabled': 'Disattivata.',
+
+  // Templates page
+  'admin.templates.list_title': 'Template',
+  'admin.templates.new': '+ Nuovo template',
+  'admin.templates.col.name': 'Nome',
+  'admin.templates.col.status': 'Stato',
+  'admin.templates.empty.title': 'Ancora nessun template',
+  'admin.templates.empty.hint': 'Crea un template per combinare domande ordinate con la configurazione del provider.',
+  'admin.templates.editor.new': 'Nuovo template',
+  'admin.templates.editor.edit': 'Modifica template #{id}',
+  'admin.templates.section.meta': 'Meta',
+  'admin.templates.section.questions': 'Domande (ordinate)',
+  'admin.templates.section.heygen': 'Configurazione HeyGen',
+  'admin.templates.section.tavus': 'Configurazione Tavus',
+  'admin.templates.field.name': 'Nome',
+  'admin.templates.field.description': 'Descrizione',
+  'admin.templates.field.enabled': 'Attivo',
+  'admin.templates.heygen.hint': 'La modalità FULL non espone una temperatura LLM, quindi è omessa qui.',
+  'admin.templates.mem.hint': 'Salva prima il template, poi gestisci le sue domande.',
+  'admin.templates.mem.add': 'Aggiungi',
+  'admin.templates.mem.none_available': 'Nessun’altra domanda attiva',
+  'admin.templates.mem.empty': 'Nessuna domanda selezionata.',
+  'admin.templates.mem.not_enabled': '(domanda #{id} — non attiva)',
+  'admin.templates.mem.save': 'Salva ordine domande',
+  'admin.templates.save': 'Salva template',
+  'admin.templates.confirm_delete': 'Eliminare il template “{name}”?',
+  'admin.templates.msg.order_saved': 'Ordine domande salvato.',
+  'admin.templates.msg.saved': 'Template salvato. (Usa “Salva ordine domande” per persistere l’appartenenza.)',
+  'admin.templates.msg.created': 'Template creato. Riaprilo per gestire le sue domande.',
+  'admin.templates.msg.deleted': 'Eliminato.',
+  'admin.templates.field.unset': '—',
+
+  // Sessions page
+  'admin.sessions.title': 'Sessioni',
+  'admin.sessions.subtitle': 'Archivio delle interviste registrate con durata, costo stimato e stato.',
+  'admin.sessions.col.id': 'ID',
+  'admin.sessions.col.provider': 'Provider',
+  'admin.sessions.col.context': 'Prompt / Template',
+  'admin.sessions.col.started': 'Iniziata',
+  'admin.sessions.col.duration': 'Durata',
+  'admin.sessions.col.cost': 'Costo stimato',
+  'admin.sessions.col.turns': 'Battute',
+  'admin.sessions.col.status': 'Stato',
+  'admin.sessions.status.ongoing': 'in corso',
+  'admin.sessions.review': 'Rivedi',
+  'admin.sessions.empty.title': 'Ancora nessuna sessione',
+  'admin.sessions.empty.hint': 'Le interviste completate appariranno qui con durata, costo stimato e trascrizione.',
+  'admin.sessions.unit.min': '{n} min',
+
+  // Session ended-reason status enums
+  'session.status.completed': 'completata',
+  'session.status.timeout': 'tempo scaduto',
+  'session.status.user_stop': 'interrotta',
+  'session.status.error': 'errore',
+
+  // Interview page (candidate-facing)
+  'interview.brand': 'Interview Tester',
+  'interview.provider.label': 'Provider',
+  'interview.provider.heygen': 'HeyGen',
+  'interview.provider.tavus': 'Tavus',
+  'interview.field.prompt': 'Prompt (persona)',
+  'interview.field.template': 'Template (domande)',
+  'interview.select.loading': 'Caricamento…',
+  'interview.select.prompt_placeholder': 'Seleziona un prompt…',
+  'interview.select.template_placeholder': 'Seleziona un template…',
+  'interview.consent': 'Questa è una sessione di test. Parlerai con un intervistatore AI; la conversazione viene trascritta e salvata localmente per l’analisi. Durante l’intervista la sessione è monitorata per l’integrità: la webcam resta attiva e vengono registrati segnali di presenza/attenzione (nessuna immagine lascia questo dispositivo). Continuando, acconsenti.',
+  'interview.start': 'Avvia intervista',
+  'interview.archive_link': 'Archivio interviste →',
+  'interview.error.no_config': 'Crea prima un prompt e un template in /admin.',
+  'interview.error.select_all': 'Seleziona un prompt, un template e accetta per continuare.',
+  'interview.error.mic_denied': 'permesso microfono negato',
+  'interview.error.provider_busy': 'Provider occupato. Riprova tra qualche secondo.',
+  'interview.waiting.move_closer': 'Avvicinati alla webcam per iniziare',
+  'interview.time_up': 'tempo scaduto',
+  'interview.status.idle': 'pronto per iniziare',
+  'interview.status.connecting': 'connessione…',
+  'interview.status.ready': 'pronto',
+  'interview.status.listening': 'in ascolto',
+  'interview.status.speaking': 'sta parlando',
+  'interview.status.stopped': 'interrotto',
+  'interview.status.waiting': 'un momento…',
+  'interview.status.error': 'errore',
+  'interview.status.error_prefix': 'errore: {msg}',
+  'interview.button.stop': '⏹ Stop',
+  'interview.button.connecting': '… connessione',
+  'interview.speaker.avatar': 'Avatar',
+  'interview.speaker.you': 'Tu',
+  'interview.meter.credits': '{n} crediti',
+  'interview.meter.credits_delta': '−{n} crediti',
+  'interview.done.title': 'Intervista terminata 🎉',
+  'interview.done.saved': 'La trascrizione è stata salvata.',
+  'interview.done.view_transcript': 'Vedi trascrizione',
+  'interview.done.restart': 'Avvia un’altra',
+
+  // Review page
+  'review.title': 'Revisione — Intervista #{id}',
+  'review.heading': 'Intervista #{id}',
+  'review.not_found': 'Sessione #{id} non trovata.',
+  'review.started': 'iniziata {ts}',
+  'review.ended': 'terminata {ts}',
+  'review.integrity.title': 'Integrità',
+  'review.integrity.risk': 'rischio {band} · {score}',
+  'review.integrity.none': 'Nessun segnale registrato.',
+  'review.band.low': 'basso',
+  'review.band.medium': 'medio',
+  'review.band.high': 'alto',
+  'review.snapshots.title': 'Snapshot webcam ({n})',
+  'review.transcript.empty': 'Nessuna battuta registrata.',
+  'review.speaker.avatar': 'Alessandra',
+  'review.speaker.you': 'Tu',
+  'review.detail.faces': '{n} volti',
+  'review.detail.yaw': 'yaw {n}°',
+};
+
+const en: Dict = {
+  'action.save': 'Save',
+  'action.cancel': 'Cancel',
+  'action.create': 'Create',
+  'action.edit': 'Edit',
+  'action.delete': 'Delete',
+  'action.back': 'Back',
+  'action.confirm_delete': 'Delete permanently?',
+  'action.loading': 'Loading…',
+  'action.saving': 'Saving…',
+
+  'state.enabled': 'Enabled',
+  'state.disabled': 'Disabled',
+  'state.empty': 'Nothing to show.',
+  'common.language': 'Language',
+
+  'gate.title': 'Locked',
+  'gate.hint': 'Enter the password to continue.',
+  'gate.placeholder': 'Password',
+  'gate.unlock': 'Unlock',
+  'gate.wrong': 'Wrong password',
+
+  'admin.title': 'Administration',
+  'admin.subtitle': 'Manage prompts, questions, templates and review sessions.',
+  'admin.nav.prompts': 'Prompts',
+  'admin.nav.questions': 'Questions',
+  'admin.nav.templates': 'Templates',
+  'admin.nav.sessions': 'Sessions',
+  'admin.nav.home': 'Home',
+
+  // Admin hub
+  'admin.hub.count': '{n} items',
+  'admin.hub.count_one': '1 item',
+  'admin.hub.count_zero': 'No items',
+  'admin.hub.open': 'Open',
+  'admin.hub.prompts.desc': 'Persona prompts and scripts: title, body, greeting, language, notes.',
+  'admin.hub.questions.desc': 'The interview question bank. Enable/disable and edit questions.',
+  'admin.hub.templates.desc': 'Experiment recipes: ordered questions plus HeyGen / Tavus provider config.',
+  'admin.hub.sessions.desc': 'Archive of recorded interviews with duration, estimated cost and status.',
+
+  // Prompts page
+  'admin.prompts.list_title': 'All prompts',
+  'admin.prompts.new': '+ New prompt',
+  'admin.prompts.col.title': 'Title',
+  'admin.prompts.col.language': 'Language',
+  'admin.prompts.col.updated': 'Updated',
+  'admin.prompts.empty.title': 'No prompts yet',
+  'admin.prompts.empty.hint': 'Create your first persona prompt to define how the avatar introduces itself and speaks.',
+  'admin.prompts.editor.new': 'New prompt',
+  'admin.prompts.editor.edit': 'Edit prompt #{id}',
+  'admin.prompts.field.title': 'Title',
+  'admin.prompts.field.body': 'Body',
+  'admin.prompts.field.body.hint': 'The system instructions that drive the avatar persona.',
+  'admin.prompts.field.greeting': 'Greeting',
+  'admin.prompts.field.greeting.hint': 'Opening line spoken at the start of the interview.',
+  'admin.prompts.field.language': 'Language',
+  'admin.prompts.field.notes': 'Notes',
+  'admin.prompts.confirm_delete': 'Delete prompt “{title}”?',
+  'admin.prompts.msg.created': 'Created.',
+  'admin.prompts.msg.saved': 'Saved.',
+  'admin.prompts.msg.deleted': 'Deleted.',
+
+  // Questions page
+  'admin.questions.list_title': 'Question bank',
+  'admin.questions.new': '+ New question',
+  'admin.questions.col.name': 'Name',
+  'admin.questions.col.status': 'Status',
+  'admin.questions.col.objective': 'Objective',
+  'admin.questions.delete_hint': 'Only disabled questions can be deleted.',
+  'admin.questions.empty.title': 'No questions yet',
+  'admin.questions.empty.hint': 'Add your first question to the bank; you can then compose it into templates.',
+  'admin.questions.editor.new': 'New question',
+  'admin.questions.editor.edit': 'Edit question #{id}',
+  'admin.questions.field.name': 'Name',
+  'admin.questions.field.text': 'Text',
+  'admin.questions.field.text.hint': 'The question exactly as it is asked to the candidate.',
+  'admin.questions.field.objective': 'Objective',
+  'admin.questions.field.objective.hint': 'What this question aims to assess (internal use).',
+  'admin.questions.action.enable': 'Enable',
+  'admin.questions.action.disable': 'Disable',
+  'admin.questions.confirm_delete': 'Delete question “{name}”?',
+  'admin.questions.msg.created': 'Created.',
+  'admin.questions.msg.saved': 'Saved.',
+  'admin.questions.msg.deleted': 'Deleted.',
+  'admin.questions.msg.enabled': 'Enabled.',
+  'admin.questions.msg.disabled': 'Disabled.',
+
+  // Templates page
+  'admin.templates.list_title': 'Templates',
+  'admin.templates.new': '+ New template',
+  'admin.templates.col.name': 'Name',
+  'admin.templates.col.status': 'Status',
+  'admin.templates.empty.title': 'No templates yet',
+  'admin.templates.empty.hint': 'Create a template to combine ordered questions with provider configuration.',
+  'admin.templates.editor.new': 'New template',
+  'admin.templates.editor.edit': 'Edit template #{id}',
+  'admin.templates.section.meta': 'Meta',
+  'admin.templates.section.questions': 'Questions (ordered)',
+  'admin.templates.section.heygen': 'HeyGen config',
+  'admin.templates.section.tavus': 'Tavus config',
+  'admin.templates.field.name': 'Name',
+  'admin.templates.field.description': 'Description',
+  'admin.templates.field.enabled': 'Enabled',
+  'admin.templates.heygen.hint': 'FULL mode does not expose an LLM temperature, so it is omitted here.',
+  'admin.templates.mem.hint': 'Save the template first, then manage its questions.',
+  'admin.templates.mem.add': 'Add',
+  'admin.templates.mem.none_available': 'No more enabled questions',
+  'admin.templates.mem.empty': 'No questions selected.',
+  'admin.templates.mem.not_enabled': '(question #{id} — not enabled)',
+  'admin.templates.mem.save': 'Save question order',
+  'admin.templates.save': 'Save template',
+  'admin.templates.confirm_delete': 'Delete template “{name}”?',
+  'admin.templates.msg.order_saved': 'Question order saved.',
+  'admin.templates.msg.saved': 'Template saved. (Use “Save question order” to persist membership.)',
+  'admin.templates.msg.created': 'Template created. Reopen it to manage its questions.',
+  'admin.templates.msg.deleted': 'Deleted.',
+  'admin.templates.field.unset': '—',
+
+  // Sessions page
+  'admin.sessions.title': 'Sessions',
+  'admin.sessions.subtitle': 'Archive of recorded interviews with duration, estimated cost and status.',
+  'admin.sessions.col.id': 'ID',
+  'admin.sessions.col.provider': 'Provider',
+  'admin.sessions.col.context': 'Prompt / Template',
+  'admin.sessions.col.started': 'Started',
+  'admin.sessions.col.duration': 'Duration',
+  'admin.sessions.col.cost': 'Estimated cost',
+  'admin.sessions.col.turns': 'Turns',
+  'admin.sessions.col.status': 'Status',
+  'admin.sessions.status.ongoing': 'ongoing',
+  'admin.sessions.review': 'Review',
+  'admin.sessions.empty.title': 'No sessions yet',
+  'admin.sessions.empty.hint': 'Completed interviews will appear here with duration, estimated cost and transcript.',
+  'admin.sessions.unit.min': '{n} min',
+
+  // Session ended-reason status enums
+  'session.status.completed': 'completed',
+  'session.status.timeout': 'timeout',
+  'session.status.user_stop': 'stopped',
+  'session.status.error': 'error',
+
+  // Interview page (candidate-facing)
+  'interview.brand': 'Interview Tester',
+  'interview.provider.label': 'Provider',
+  'interview.provider.heygen': 'HeyGen',
+  'interview.provider.tavus': 'Tavus',
+  'interview.field.prompt': 'Prompt (persona)',
+  'interview.field.template': 'Template (questions)',
+  'interview.select.loading': 'Loading…',
+  'interview.select.prompt_placeholder': 'Select a prompt…',
+  'interview.select.template_placeholder': 'Select a template…',
+  'interview.consent': 'This is a test session. You will speak with an AI interviewer; the conversation is transcribed and stored locally for analysis. During the interview the session is monitored for integrity: the webcam stays active and presence/attention signals are recorded (no image leaves this device). By continuing, you consent.',
+  'interview.start': 'Start interview',
+  'interview.archive_link': 'Interview archive →',
+  'interview.error.no_config': 'Create a prompt and a template in /admin first.',
+  'interview.error.select_all': 'Select a prompt, a template, and accept to continue.',
+  'interview.error.mic_denied': 'microphone permission denied',
+  'interview.error.provider_busy': 'Provider busy. Try again in a few seconds.',
+  'interview.waiting.move_closer': 'Move closer to the webcam to begin',
+  'interview.time_up': 'time is up',
+  'interview.status.idle': 'ready to start',
+  'interview.status.connecting': 'connecting…',
+  'interview.status.ready': 'ready',
+  'interview.status.listening': 'listening',
+  'interview.status.speaking': 'speaking',
+  'interview.status.stopped': 'stopped',
+  'interview.status.waiting': 'one moment…',
+  'interview.status.error': 'error',
+  'interview.status.error_prefix': 'error: {msg}',
+  'interview.button.stop': '⏹ Stop',
+  'interview.button.connecting': '… connecting',
+  'interview.speaker.avatar': 'Avatar',
+  'interview.speaker.you': 'You',
+  'interview.meter.credits': '{n} credits',
+  'interview.meter.credits_delta': '−{n} credits',
+  'interview.done.title': 'Interview finished 🎉',
+  'interview.done.saved': 'The transcript has been saved.',
+  'interview.done.view_transcript': 'View transcript',
+  'interview.done.restart': 'Start another',
+
+  // Review page
+  'review.title': 'Review — Interview #{id}',
+  'review.heading': 'Interview #{id}',
+  'review.not_found': 'Session #{id} not found.',
+  'review.started': 'started {ts}',
+  'review.ended': 'ended {ts}',
+  'review.integrity.title': 'Integrity',
+  'review.integrity.risk': '{band} risk · {score}',
+  'review.integrity.none': 'No signals recorded.',
+  'review.band.low': 'low',
+  'review.band.medium': 'medium',
+  'review.band.high': 'high',
+  'review.snapshots.title': 'Webcam snapshots ({n})',
+  'review.transcript.empty': 'No utterances stored.',
+  'review.speaker.avatar': 'Alessandra',
+  'review.speaker.you': 'You',
+  'review.detail.faces': '{n} faces',
+  'review.detail.yaw': 'yaw {n}°',
+};
+
+export const messages: Record<Locale, Dict> = { it, en };
+
+// Translate `key` for `locale`, with `{param}` interpolation. Falls back to the default
+// locale, then to the key itself, so a missing string is visible but never crashes.
+export function t(locale: Locale, key: string, params?: Record<string, string | number>): string {
+  const raw = messages[locale]?.[key] ?? messages[DEFAULT_LOCALE][key] ?? key;
+  if (!params) return raw;
+  return raw.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? `{${k}}`));
 }

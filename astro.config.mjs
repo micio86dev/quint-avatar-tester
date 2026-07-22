@@ -1,5 +1,6 @@
 import { defineConfig, envField } from 'astro/config';
 import node from '@astrojs/node';
+import tailwindcss from '@tailwindcss/vite';
 
 // Local-only server app (`output: 'server'`). The Node standalone adapter lets us run
 // a persistent Node process locally, which is required for the native `better-sqlite3`
@@ -11,6 +12,7 @@ export default defineConfig({
   // Keep Vite from trying to bundle the native SQLite addon into the SSR build —
   // it must stay a real Node require at runtime.
   vite: {
+    plugins: [tailwindcss()],
     ssr: { external: ['better-sqlite3'] },
     optimizeDeps: { exclude: ['better-sqlite3'] },
   },

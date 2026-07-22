@@ -5,12 +5,19 @@
 // Every utterance is persisted to local SQLite. The page is a small three-screen state
 // machine (start → interview → done) that never scrolls on Y.
 //
-// This is an operator test tool: the UI copy is English; only the avatar's spoken
+// Candidate-facing UI is bilingual IT/EN via the i18n module; only the avatar's spoken
 // content stays Italian.
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../lib/i18n';
+export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={locale}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -20,49 +27,48 @@
     <main class="app" id="app" data-screen="start">
       <!-- ── START ─────────────────────────────────────────────────────────── -->
       <section class="screen panel" id="screen-start">
-        <h1 class="brand">Interview Tester</h1>
+        <div class="lang-switch" role="group" aria-label={t(locale, 'common.language')}>
+          <button type="button" class="lang" data-lang="it" aria-pressed={locale === 'it'}>IT</button>
+          <button type="button" class="lang" data-lang="en" aria-pressed={locale === 'en'}>EN</button>
+        </div>
 
-        <div class="provider-toggle" role="radiogroup" aria-label="Provider">
+        <h1 class="brand">{t(locale, 'interview.brand')}</h1>
+
+        <div class="provider-toggle" role="radiogroup" aria-label={t(locale, 'interview.provider.label')}>
           <label>
             <input type="radio" name="provider" value="heygen" checked />
-            <span>HeyGen</span>
+            <span>{t(locale, 'interview.provider.heygen')}</span>
           </label>
           <label>
             <input type="radio" name="provider" value="tavus" />
-            <span>Tavus</span>
+            <span>{t(locale, 'interview.provider.tavus')}</span>
           </label>
         </div>
 
         <div class="selectors">
           <label class="field">
-            <span class="field-label">Prompt (persona)</span>
+            <span class="field-label">{t(locale, 'interview.field.prompt')}</span>
             <select id="prompt-select" class="select">
-              <option value="">Loading…</option>
+              <option value="">{t(locale, 'interview.select.loading')}</option>
             </select>
           </label>
           <label class="field">
-            <span class="field-label">Template (questions)</span>
+            <span class="field-label">{t(locale, 'interview.field.template')}</span>
             <select id="template-select" class="select">
-              <option value="">Loading…</option>
+              <option value="">{t(locale, 'interview.select.loading')}</option>
             </select>
           </label>
         </div>
 
         <label class="consent">
           <input type="checkbox" id="consent" />
-          <span
-            >This is a test session. You will speak with an AI interviewer; the
-            conversation is transcribed and stored locally for analysis. During the
-            interview the session is monitored for integrity: the webcam stays active and
-            presence/attention signals are recorded (no image leaves this device). By
-            continuing, you consent.</span
-          >
+          <span>{t(locale, 'interview.consent')}</span>
         </label>
 
-        <button type="button" id="btn-start" class="btn primary" disabled>Start interview</button>
+        <button type="button" id="btn-start" class="btn primary" disabled>{t(locale, 'interview.start')}</button>
 
         <p id="start-error" class="error-line"></p>
-        <a href="/admin" class="admin-link">Interview archive →</a>
+        <a href="/admin" class="admin-link">{t(locale, 'interview.archive_link')}</a>
       </section>
 
       <!-- ── INTERVIEW ─────────────────────────────────────────────────────────── -->
@@ -90,9 +96,9 @@
         </section>
 
         <footer class="bar">
-          <p id="status" class="status" data-state="idle">ready to start</p>
+          <p id="status" class="status" data-state="idle">{t(locale, 'interview.status.idle')}</p>
           <button id="talk-button" class="pulsantone" type="button" data-on="false">
-            ⏹ Stop
+            {t(locale, 'interview.button.stop')}
           </button>
         </footer>
         <div id="toast" class="toast" hidden>
@@ -102,12 +108,23 @@
 
       <!-- ── DONE ──────────────────────────────────────────────────────────────── -->
       <section class="screen panel" id="screen-done">
-        <h2>Interview finished 🎉</h2>
-        <p class="hint">The transcript has been saved.</p>
-        <a id="transcript-link" class="btn primary" href="#">View transcript</a>
-        <button type="button" id="btn-restart" class="btn">Start another</button>
+        <h2>{t(locale, 'interview.done.title')}</h2>
+        <p class="hint">{t(locale, 'interview.done.saved')}</p>
+        <a id="transcript-link" class="btn primary" href="#">{t(locale, 'interview.done.view_transcript')}</a>
+        <button type="button" id="btn-restart" class="btn">{t(locale, 'interview.done.restart')}</button>
       </section>
     </main>
+
+    <script is:inline>
+      // Language switcher: set the cookie and reload so SSR re-renders in the new locale.
+      for (const el of document.querySelectorAll('.lang')) {
+        el.addEventListener('click', () => {
+          const lang = el.getAttribute('data-lang');
+          document.cookie = `lang=${lang}; path=/; max-age=31536000; samesite=lax`;
+          location.reload();
+        });
+      }
+    </script>
 
     <script>
       import '../scripts/interview-client.ts';
@@ -145,6 +162,7 @@
 
       /* Centered panels (start / done). */
       .panel {
+        position: relative;
         flex-direction: column;
         align-items: center;
         justify-content: center;
@@ -180,6 +198,33 @@
         text-decoration: none;
       }
       .admin-link:hover { color: #9aa0aa; }
+
+      /* Language switcher (start screen, top-right corner). */
+      .lang-switch {
+        position: absolute;
+        top: 16px;
+        right: 18px;
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        background: #17181f;
+        border: 1px solid #2a2c36;
+        border-radius: 999px;
+      }
+      .lang {
+        padding: 4px 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #9aa0aa;
+        background: transparent;
+        border: 0;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .lang[aria-pressed='true'] {
+        color: #04150f;
+        background: #10b981;
+      }
 
       /* Prompt / template selectors. */
       .selectors {

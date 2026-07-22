@@ -148,6 +148,34 @@ export function getSession(sessionId: number): SessionRow | undefined {
     | undefined;
 }
 
+export interface SessionListRow {
+  id: number;
+  provider: string;
+  started_at: string;
+  ended_at: string | null;
+  ended_reason: string | null;
+  prompt_title: string | null; // NULL if the prompt was later deleted
+  template_name: string | null; // NULL if the template was later deleted
+  utterance_count: number;
+}
+
+// Archive list: every recorded session with the prompt/template it ran and its turn count,
+// most recent first. Duration and cost are derived at render time (see pricing.ts), the
+// same query-time approach used by /review/[id].
+export function listSessions(): SessionListRow[] {
+  return getDb()
+    .prepare(
+      `SELECT s.id, s.provider, s.started_at, s.ended_at, s.ended_reason,
+              p.title AS prompt_title, t.name AS template_name,
+              (SELECT COUNT(*) FROM utterances u WHERE u.session_id = s.id) AS utterance_count
+         FROM sessions s
+         LEFT JOIN prompts p ON p.id = s.prompt_id
+         LEFT JOIN templates t ON t.id = s.template_id
+        ORDER BY s.started_at DESC, s.id DESC`,
+    )
+    .all() as SessionListRow[];
+}
+
 // ── Utterances ────────────────────────────────────────────────────────────────
 export function insertUtterance(sessionId: number, u: UtteranceInput): void {
   getDb()

@@ -2,280 +2,247 @@
 // Prompts CRUD. Lists persona prompts and provides a create/edit form.
 // Talks to /api/admin/prompts (list/create) and /api/admin/prompts/[id]
 // (get/update/delete). All client logic is vanilla fetch, no framework.
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../../lib/i18n';
+
 export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Prompts — Admin</title>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>Prompts</h1>
-        <a href="/admin" class="back">← Admin</a>
-      </header>
+<AdminLayout section="prompts" title={t(locale, 'admin.nav.prompts')}>
+  <div class="mb-8 flex items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">{t(locale, 'admin.nav.prompts')}</h1>
+      <p class="mt-1 text-sm text-muted">{t(locale, 'admin.hub.prompts.desc')}</p>
+    </div>
+    <button type="button" id="btn-new" class="btn btn-primary shrink-0">
+      {t(locale, 'admin.prompts.new')}
+    </button>
+  </div>
 
-      <p id="status" class="status" hidden></p>
+  <p id="status" class="mb-5 hidden rounded-md px-4 py-2.5 text-sm" role="status"></p>
 
-      <section class="list-section">
-        <div class="list-head">
-          <h2>All prompts</h2>
-          <button type="button" id="btn-new" class="btn primary">+ New prompt</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Language</th>
-              <th>Updated</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="rows">
-            <tr><td colspan="4" class="muted">Loading…</td></tr>
-          </tbody>
-        </table>
-      </section>
+  <section class="card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-border text-left text-xs uppercase tracking-wide text-faint">
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.prompts.col.title')}</th>
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.prompts.col.language')}</th>
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.prompts.col.updated')}</th>
+          <th class="px-5 py-3"></th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="4" class="px-5 py-6 text-muted">{t(locale, 'action.loading')}</td></tr>
+      </tbody>
+    </table>
+  </section>
 
-      <section id="editor" class="editor" hidden>
-        <h2 id="editor-title">New prompt</h2>
-        <form id="form">
-          <input type="hidden" id="f-id" />
-          <label>Title <span class="req">*</span>
-            <input type="text" id="f-title" required />
-          </label>
-          <label>Body <span class="req">*</span>
-            <textarea id="f-body" rows="8" required></textarea>
-          </label>
-          <label>Greeting
-            <input type="text" id="f-greeting" />
-          </label>
-          <label>Language
-            <input type="text" id="f-language" placeholder="it" />
-          </label>
-          <label>Notes
-            <textarea id="f-notes" rows="3"></textarea>
-          </label>
-          <div class="actions">
-            <button type="submit" class="btn primary">Save</button>
-            <button type="button" id="btn-cancel" class="btn">Cancel</button>
-          </div>
-        </form>
-      </section>
-    </main>
+  <section id="editor" class="card mt-8 p-6" hidden>
+    <h2 id="editor-title" class="mb-5 text-lg font-semibold">{t(locale, 'admin.prompts.editor.new')}</h2>
+    <form id="form">
+      <input type="hidden" id="f-id" />
+      <div class="field">
+        <label class="label" for="f-title">{t(locale, 'admin.prompts.field.title')} <span class="text-danger">*</span></label>
+        <input type="text" id="f-title" class="input" required />
+      </div>
+      <div class="field">
+        <label class="label" for="f-body">{t(locale, 'admin.prompts.field.body')} <span class="text-danger">*</span></label>
+        <textarea id="f-body" class="input" rows="8" required></textarea>
+        <p class="hint">{t(locale, 'admin.prompts.field.body.hint')}</p>
+      </div>
+      <div class="field">
+        <label class="label" for="f-greeting">{t(locale, 'admin.prompts.field.greeting')}</label>
+        <input type="text" id="f-greeting" class="input" />
+        <p class="hint">{t(locale, 'admin.prompts.field.greeting.hint')}</p>
+      </div>
+      <div class="field">
+        <label class="label" for="f-language">{t(locale, 'admin.prompts.field.language')}</label>
+        <select id="f-language" class="input max-w-40">
+          <option value="it">it</option>
+          <option value="en">en</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="f-notes">{t(locale, 'admin.prompts.field.notes')}</label>
+        <textarea id="f-notes" class="input min-h-20" rows="3"></textarea>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="btn btn-primary">{t(locale, 'action.save')}</button>
+        <button type="button" id="btn-cancel" class="btn btn-ghost">{t(locale, 'action.cancel')}</button>
+      </div>
+    </form>
+  </section>
 
-    <script is:inline>
-      const API = '/api/admin/prompts';
-      const $ = (id) => document.getElementById(id);
-      const statusEl = $('status');
+  <script>
+    import { t, type Locale } from '../../lib/i18n';
 
-      function flash(msg, ok = true) {
-        statusEl.hidden = false;
-        statusEl.textContent = msg;
-        statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+    const locale = (document.documentElement.lang || 'it') as Locale;
+    const API = '/api/admin/prompts';
+    const $ = (id: string) => document.getElementById(id) as HTMLElement;
+    const statusEl = $('status');
+
+    function flash(msg: string, ok = true) {
+      statusEl.hidden = false;
+      statusEl.textContent = msg;
+      statusEl.className =
+        'mb-5 rounded-md px-4 py-2.5 text-sm ' +
+        (ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger');
+    }
+    function clearFlash() {
+      statusEl.hidden = true;
+    }
+
+    async function api(url: string, opts?: RequestInit) {
+      const res = await fetch(url, opts);
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        /* 204 etc. */
       }
-      function clearFlash() { statusEl.hidden = true; }
+      if (!res.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
+      return data;
+    }
 
-      async function api(url, opts) {
-        const res = await fetch(url, opts);
-        let data = null;
-        try { data = await res.json(); } catch { /* 204 etc. */ }
-        if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-        return data;
-      }
+    function fmtDate(s: string | null) {
+      if (!s) return '—';
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? s : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+    }
 
-      function fmtDate(s) {
-        if (!s) return '—';
-        const d = new Date(s);
-        return isNaN(d) ? s : d.toLocaleString();
-      }
-
-      async function loadList() {
-        const rows = $('rows');
-        try {
-          const list = await api(API);
-          if (!list.length) {
-            rows.innerHTML = '<tr><td colspan="4" class="muted">No prompts yet.</td></tr>';
-            return;
-          }
-          rows.innerHTML = '';
-          for (const p of list) {
-            const tr = document.createElement('tr');
-            const title = document.createElement('td');
-            title.textContent = p.title;
-            title.className = 'name';
-            const lang = document.createElement('td');
-            lang.textContent = p.language || '—';
-            const upd = document.createElement('td');
-            upd.className = 'date';
-            upd.textContent = fmtDate(p.updated_at);
-            const act = document.createElement('td');
-            act.className = 'action';
-            const edit = document.createElement('button');
-            edit.className = 'btn small';
-            edit.textContent = 'Edit';
-            edit.onclick = () => openEdit(p.id);
-            const del = document.createElement('button');
-            del.className = 'btn small danger';
-            del.textContent = 'Delete';
-            del.onclick = () => remove(p.id, p.title);
-            act.append(edit, del);
-            tr.append(title, lang, upd, act);
-            rows.appendChild(tr);
-          }
-        } catch (e) {
-          rows.innerHTML = '<tr><td colspan="4" class="err">' + e.message + '</td></tr>';
+    async function loadList() {
+      const rows = $('rows');
+      try {
+        const list = await api(API);
+        if (!list.length) {
+          rows.innerHTML =
+            '<tr><td colspan="4" class="px-5 py-10 text-center"><span class="block font-medium text-fg">' +
+            t(locale, 'admin.prompts.empty.title') +
+            '</span><span class="mt-1 block text-sm text-muted">' +
+            t(locale, 'admin.prompts.empty.hint') +
+            '</span></td></tr>';
+          return;
         }
-      }
+        rows.innerHTML = '';
+        for (const p of list) {
+          const tr = document.createElement('tr');
+          tr.className = 'border-b border-border last:border-0 hover:bg-panel';
 
-      function openNew() {
-        clearFlash();
-        $('editor-title').textContent = 'New prompt';
-        $('f-id').value = '';
-        $('form').reset();
+          const title = document.createElement('td');
+          title.className = 'px-5 py-3 font-medium text-fg';
+          title.textContent = p.title;
+
+          const lang = document.createElement('td');
+          lang.className = 'px-5 py-3 text-muted';
+          lang.textContent = p.language || '—';
+
+          const upd = document.createElement('td');
+          upd.className = 'px-5 py-3 whitespace-nowrap text-faint tabular-nums';
+          upd.textContent = fmtDate(p.updated_at);
+
+          const act = document.createElement('td');
+          act.className = 'px-5 py-3 text-right whitespace-nowrap';
+          const edit = document.createElement('button');
+          edit.className = 'btn btn-ghost btn-sm';
+          edit.textContent = t(locale, 'action.edit');
+          edit.onclick = () => openEdit(p.id);
+          const del = document.createElement('button');
+          del.className = 'btn btn-danger btn-sm ml-1.5';
+          del.textContent = t(locale, 'action.delete');
+          del.onclick = () => remove(p.id, p.title);
+          act.append(edit, del);
+
+          tr.append(title, lang, upd, act);
+          rows.appendChild(tr);
+        }
+      } catch (e: any) {
+        rows.innerHTML = '<tr><td colspan="4" class="px-5 py-6 text-danger">' + e.message + '</td></tr>';
+      }
+    }
+
+    function openNew() {
+      clearFlash();
+      $('editor-title').textContent = t(locale, 'admin.prompts.editor.new');
+      ($('f-id') as HTMLInputElement).value = '';
+      ($('form') as HTMLFormElement).reset();
+      ($('f-language') as HTMLSelectElement).value = 'it';
+      $('editor').hidden = false;
+      ($('f-title') as HTMLInputElement).focus();
+    }
+
+    async function openEdit(id: number) {
+      clearFlash();
+      try {
+        const p = await api(API + '/' + id);
+        $('editor-title').textContent = t(locale, 'admin.prompts.editor.edit', { id: p.id });
+        ($('f-id') as HTMLInputElement).value = String(p.id);
+        ($('f-title') as HTMLInputElement).value = p.title || '';
+        ($('f-body') as HTMLTextAreaElement).value = p.body || '';
+        ($('f-greeting') as HTMLInputElement).value = p.greeting || '';
+        ($('f-language') as HTMLSelectElement).value = p.language || 'it';
+        ($('f-notes') as HTMLTextAreaElement).value = p.notes || '';
         $('editor').hidden = false;
-        $('f-title').focus();
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      } catch (e: any) {
+        flash(e.message, false);
       }
+    }
 
-      async function openEdit(id) {
-        clearFlash();
-        try {
-          const p = await api(API + '/' + id);
-          $('editor-title').textContent = 'Edit prompt #' + p.id;
-          $('f-id').value = p.id;
-          $('f-title').value = p.title || '';
-          $('f-body').value = p.body || '';
-          $('f-greeting').value = p.greeting || '';
-          $('f-language').value = p.language || '';
-          $('f-notes').value = p.notes || '';
-          $('editor').hidden = false;
-          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        } catch (e) {
-          flash(e.message, false);
+    async function remove(id: number, title: string) {
+      if (!confirm(t(locale, 'admin.prompts.confirm_delete', { title }))) return;
+      try {
+        await api(API + '/' + id, { method: 'DELETE' });
+        flash(t(locale, 'admin.prompts.msg.deleted'));
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
+    ($('form') as HTMLFormElement).addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const id = ($('f-id') as HTMLInputElement).value;
+      const payload = {
+        title: ($('f-title') as HTMLInputElement).value.trim(),
+        body: ($('f-body') as HTMLTextAreaElement).value,
+        greeting: ($('f-greeting') as HTMLInputElement).value.trim() || null,
+        language: ($('f-language') as HTMLSelectElement).value.trim() || 'it',
+        notes: ($('f-notes') as HTMLTextAreaElement).value.trim() || null,
+      };
+      try {
+        if (id) {
+          await api(API + '/' + id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          flash(t(locale, 'admin.prompts.msg.saved'));
+        } else {
+          await api(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          flash(t(locale, 'admin.prompts.msg.created'));
         }
+        $('editor').hidden = true;
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
       }
+    });
 
-      async function remove(id, title) {
-        if (!confirm('Delete prompt "' + title + '"?')) return;
-        try {
-          await api(API + '/' + id, { method: 'DELETE' });
-          flash('Deleted.');
-          loadList();
-        } catch (e) {
-          flash(e.message, false);
-        }
-      }
+    ($('btn-new') as HTMLButtonElement).onclick = openNew;
+    ($('btn-cancel') as HTMLButtonElement).onclick = () => {
+      $('editor').hidden = true;
+      clearFlash();
+    };
 
-      $('form').addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const id = $('f-id').value;
-        const payload = {
-          title: $('f-title').value.trim(),
-          body: $('f-body').value,
-          greeting: $('f-greeting').value.trim() || null,
-          language: $('f-language').value.trim() || 'it',
-          notes: $('f-notes').value.trim() || null,
-        };
-        try {
-          if (id) {
-            await api(API + '/' + id, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            flash('Saved.');
-          } else {
-            await api(API, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            flash('Created.');
-          }
-          $('editor').hidden = true;
-          loadList();
-        } catch (e) {
-          flash(e.message, false);
-        }
-      });
-
-      $('btn-new').onclick = openNew;
-      $('btn-cancel').onclick = () => { $('editor').hidden = true; clearFlash(); };
-
-      loadList();
-    </script>
-
-    <style>
-      :global(body) {
-        margin: 0;
-        background: #0b0c10;
-        color: #e8eaed;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      }
-      main { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; }
-      header { display: flex; align-items: baseline; gap: 20px; margin-bottom: 20px; }
-      h1 { margin: 0; font-size: 1.5rem; }
-      h2 { font-size: 1.1rem; margin: 0; }
-      .back { color: #6b7280; font-size: 0.85rem; text-decoration: none; }
-      .back:hover { color: #9aa0aa; }
-
-      .status {
-        margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; font-size: 0.9rem;
-      }
-      .status.ok { background: #052e22; color: #a7f3d0; border: 1px solid #10b981; }
-      .status.err { background: #2e0808; color: #fca5a5; border: 1px solid #ef4444; }
-
-      .list-head {
-        display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
-      }
-      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-      thead th {
-        text-align: left; padding: 8px 12px; color: #6b7280; font-weight: 600;
-        font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
-        border-bottom: 1px solid #2a2c36;
-      }
-      tbody tr { border-bottom: 1px solid #1c1e27; }
-      tbody tr:hover { background: #12131a; }
-      td { padding: 10px 12px; vertical-align: middle; }
-      .name { font-weight: 600; }
-      .date { color: #6b7280; font-size: 0.82rem; white-space: nowrap; }
-      .muted { color: #4b5563; }
-      .err { color: #fca5a5; }
-      .action { text-align: right; white-space: nowrap; }
-      .action .btn { margin-left: 6px; }
-
-      .editor {
-        margin-top: 32px; padding: 20px; border: 1px solid #2a2c36;
-        border-radius: 12px; background: #12131a;
-      }
-      form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
-      label {
-        display: flex; flex-direction: column; gap: 6px;
-        font-size: 0.85rem; color: #cbd5e1;
-      }
-      .req { color: #f87171; }
-      input[type='text'], textarea, select {
-        padding: 9px 12px; font-size: 0.95rem; color: #e8eaed;
-        background: #17181f; border: 1px solid #2a2c36; border-radius: 8px;
-        font-family: inherit;
-      }
-      textarea { resize: vertical; }
-      .actions { display: flex; gap: 10px; margin-top: 4px; }
-
-      .btn {
-        padding: 8px 16px; font-size: 0.9rem; font-weight: 600; color: #e8eaed;
-        background: #24262f; border: 1px solid #2a2c36; border-radius: 8px;
-        cursor: pointer; transition: filter 0.15s;
-      }
-      .btn:hover { filter: brightness(1.15); }
-      .btn.primary { color: #04150f; background: #10b981; border-color: transparent; }
-      .btn.small { padding: 4px 12px; font-size: 0.8rem; }
-      .btn.danger { color: #fca5a5; border-color: #7f1d1d; }
-      .btn.danger:hover { background: #2e0808; }
-    </style>
-  </body>
-</html>
+    loadList();
+  </script>
+</AdminLayout>

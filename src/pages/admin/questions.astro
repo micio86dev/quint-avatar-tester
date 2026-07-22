@@ -3,302 +3,270 @@
 // create/edit, an enable/disable toggle, and delete. The API blocks deleting an
 // enabled question (409) — that error message is surfaced to the operator.
 // Talks to /api/admin/questions and /api/admin/questions/[id]. Vanilla fetch.
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../../lib/i18n';
+
 export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Questions — Admin</title>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>Questions</h1>
-        <a href="/admin" class="back">← Admin</a>
-      </header>
+<AdminLayout section="questions" title={t(locale, 'admin.nav.questions')}>
+  <div class="mb-8 flex items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">{t(locale, 'admin.nav.questions')}</h1>
+      <p class="mt-1 text-sm text-muted">{t(locale, 'admin.hub.questions.desc')}</p>
+    </div>
+    <button type="button" id="btn-new" class="btn btn-primary shrink-0">
+      {t(locale, 'admin.questions.new')}
+    </button>
+  </div>
 
-      <p id="status" class="status" hidden></p>
+  <p id="status" class="mb-5 hidden rounded-md px-4 py-2.5 text-sm" role="status"></p>
 
-      <section class="list-section">
-        <div class="list-head">
-          <h2>Question bank</h2>
-          <button type="button" id="btn-new" class="btn primary">+ New question</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="rows">
-            <tr><td colspan="3" class="muted">Loading…</td></tr>
-          </tbody>
-        </table>
-        <p class="hint">Only disabled questions can be deleted.</p>
-      </section>
+  <section class="card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-border text-left text-xs uppercase tracking-wide text-faint">
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.questions.col.name')}</th>
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.questions.col.status')}</th>
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.questions.col.objective')}</th>
+          <th class="px-5 py-3"></th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="4" class="px-5 py-6 text-muted">{t(locale, 'action.loading')}</td></tr>
+      </tbody>
+    </table>
+  </section>
+  <p class="hint">{t(locale, 'admin.questions.delete_hint')}</p>
 
-      <section id="editor" class="editor" hidden>
-        <h2 id="editor-title">New question</h2>
-        <form id="form">
-          <input type="hidden" id="f-id" />
-          <input type="hidden" id="f-enabled" />
-          <label>Name <span class="req">*</span>
-            <input type="text" id="f-name" required />
-          </label>
-          <label>Text <span class="req">*</span>
-            <textarea id="f-text" rows="5" required></textarea>
-          </label>
-          <label>Objective
-            <textarea id="f-objective" rows="3"></textarea>
-          </label>
-          <div class="actions">
-            <button type="submit" class="btn primary">Save</button>
-            <button type="button" id="btn-cancel" class="btn">Cancel</button>
-          </div>
-        </form>
-      </section>
-    </main>
+  <section id="editor" class="card mt-8 p-6" hidden>
+    <h2 id="editor-title" class="mb-5 text-lg font-semibold">{t(locale, 'admin.questions.editor.new')}</h2>
+    <form id="form">
+      <input type="hidden" id="f-id" />
+      <input type="hidden" id="f-enabled" />
+      <div class="field">
+        <label class="label" for="f-name">{t(locale, 'admin.questions.field.name')} <span class="text-danger">*</span></label>
+        <input type="text" id="f-name" class="input" required />
+      </div>
+      <div class="field">
+        <label class="label" for="f-text">{t(locale, 'admin.questions.field.text')} <span class="text-danger">*</span></label>
+        <textarea id="f-text" class="input" rows="5" required></textarea>
+        <p class="hint">{t(locale, 'admin.questions.field.text.hint')}</p>
+      </div>
+      <div class="field">
+        <label class="label" for="f-objective">{t(locale, 'admin.questions.field.objective')}</label>
+        <textarea id="f-objective" class="input min-h-20" rows="3"></textarea>
+        <p class="hint">{t(locale, 'admin.questions.field.objective.hint')}</p>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="btn btn-primary">{t(locale, 'action.save')}</button>
+        <button type="button" id="btn-cancel" class="btn btn-ghost">{t(locale, 'action.cancel')}</button>
+      </div>
+    </form>
+  </section>
 
-    <script is:inline>
-      const API = '/api/admin/questions';
-      const $ = (id) => document.getElementById(id);
-      const statusEl = $('status');
+  <script>
+    import { t, type Locale } from '../../lib/i18n';
 
-      function flash(msg, ok = true) {
-        statusEl.hidden = false;
-        statusEl.textContent = msg;
-        statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+    const locale = (document.documentElement.lang || 'it') as Locale;
+    const API = '/api/admin/questions';
+    const $ = (id: string) => document.getElementById(id) as HTMLElement;
+    const statusEl = $('status');
+
+    function flash(msg: string, ok = true) {
+      statusEl.hidden = false;
+      statusEl.textContent = msg;
+      statusEl.className =
+        'mb-5 rounded-md px-4 py-2.5 text-sm ' +
+        (ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger');
+    }
+    function clearFlash() {
+      statusEl.hidden = true;
+    }
+
+    async function api(url: string, opts?: RequestInit) {
+      const res = await fetch(url, opts);
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        /* 204 */
       }
-      function clearFlash() { statusEl.hidden = true; }
+      if (!res.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
+      return data;
+    }
 
-      async function api(url, opts) {
-        const res = await fetch(url, opts);
-        let data = null;
-        try { data = await res.json(); } catch { /* 204 */ }
-        if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-        return data;
-      }
+    function preview(s: string | null): string {
+      if (!s) return '—';
+      const clean = s.trim().replace(/\s+/g, ' ');
+      return clean.length > 80 ? clean.slice(0, 80) + '…' : clean;
+    }
 
-      async function loadList() {
-        const rows = $('rows');
-        try {
-          const list = await api(API);
-          if (!list.length) {
-            rows.innerHTML = '<tr><td colspan="3" class="muted">No questions yet.</td></tr>';
-            return;
-          }
-          rows.innerHTML = '';
-          for (const q of list) {
-            const on = q.enabled === 1 || q.enabled === true;
-            const tr = document.createElement('tr');
-
-            const name = document.createElement('td');
-            name.className = 'name';
-            name.textContent = q.name;
-
-            const st = document.createElement('td');
-            const badge = document.createElement('span');
-            badge.className = 'badge ' + (on ? 'on' : 'off');
-            badge.textContent = on ? 'enabled' : 'disabled';
-            st.appendChild(badge);
-
-            const act = document.createElement('td');
-            act.className = 'action';
-            const toggle = document.createElement('button');
-            toggle.className = 'btn small';
-            toggle.textContent = on ? 'Disable' : 'Enable';
-            toggle.onclick = () => setEnabled(q, !on);
-            const edit = document.createElement('button');
-            edit.className = 'btn small';
-            edit.textContent = 'Edit';
-            edit.onclick = () => openEdit(q.id);
-            const del = document.createElement('button');
-            del.className = 'btn small danger';
-            del.textContent = 'Delete';
-            del.onclick = () => remove(q.id, q.name);
-            act.append(toggle, edit, del);
-
-            tr.append(name, st, act);
-            rows.appendChild(tr);
-          }
-        } catch (e) {
-          rows.innerHTML = '<tr><td colspan="3" class="err">' + e.message + '</td></tr>';
+    async function loadList() {
+      const rows = $('rows');
+      try {
+        const list = await api(API);
+        if (!list.length) {
+          rows.innerHTML =
+            '<tr><td colspan="4" class="px-5 py-10 text-center"><span class="block font-medium text-fg">' +
+            t(locale, 'admin.questions.empty.title') +
+            '</span><span class="mt-1 block text-sm text-muted">' +
+            t(locale, 'admin.questions.empty.hint') +
+            '</span></td></tr>';
+          return;
         }
-      }
+        rows.innerHTML = '';
+        for (const q of list) {
+          const on = q.enabled === 1 || q.enabled === true;
+          const tr = document.createElement('tr');
+          tr.className = 'border-b border-border last:border-0 hover:bg-panel';
 
-      // Toggle. The PUT endpoint requires name+text, so we send the full row plus the
-      // new enabled flag rather than a bare { enabled } patch.
-      async function setEnabled(q, enabled) {
-        clearFlash();
-        try {
-          await api(API + '/' + q.id, {
+          const name = document.createElement('td');
+          name.className = 'px-5 py-3 font-medium text-fg';
+          name.textContent = q.name;
+
+          const st = document.createElement('td');
+          st.className = 'px-5 py-3';
+          const badge = document.createElement('span');
+          badge.className = 'badge ' + (on ? 'badge-on' : 'badge-off');
+          badge.textContent = on ? t(locale, 'state.enabled') : t(locale, 'state.disabled');
+          st.appendChild(badge);
+
+          const obj = document.createElement('td');
+          obj.className = 'px-5 py-3 text-muted';
+          obj.textContent = preview(q.objective);
+
+          const act = document.createElement('td');
+          act.className = 'px-5 py-3 text-right whitespace-nowrap';
+          const toggle = document.createElement('button');
+          toggle.className = 'btn btn-ghost btn-sm';
+          toggle.textContent = on
+            ? t(locale, 'admin.questions.action.disable')
+            : t(locale, 'admin.questions.action.enable');
+          toggle.onclick = () => setEnabled(q, !on);
+          const edit = document.createElement('button');
+          edit.className = 'btn btn-ghost btn-sm ml-1.5';
+          edit.textContent = t(locale, 'action.edit');
+          edit.onclick = () => openEdit(q.id);
+          const del = document.createElement('button');
+          del.className = 'btn btn-danger btn-sm ml-1.5';
+          del.textContent = t(locale, 'action.delete');
+          del.onclick = () => remove(q.id, q.name);
+          act.append(toggle, edit, del);
+
+          tr.append(name, st, obj, act);
+          rows.appendChild(tr);
+        }
+      } catch (e: any) {
+        rows.innerHTML = '<tr><td colspan="4" class="px-5 py-6 text-danger">' + e.message + '</td></tr>';
+      }
+    }
+
+    // Toggle. The PUT endpoint requires name+text, so we send the full row plus the
+    // new enabled flag rather than a bare { enabled } patch.
+    async function setEnabled(q: any, enabled: boolean) {
+      clearFlash();
+      try {
+        await api(API + '/' + q.id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: q.name,
+            text: q.text,
+            objective: q.objective ?? null,
+            enabled,
+          }),
+        });
+        flash(enabled ? t(locale, 'admin.questions.msg.enabled') : t(locale, 'admin.questions.msg.disabled'));
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
+    function openNew() {
+      clearFlash();
+      $('editor-title').textContent = t(locale, 'admin.questions.editor.new');
+      ($('f-id') as HTMLInputElement).value = '';
+      ($('f-enabled') as HTMLInputElement).value = '';
+      ($('form') as HTMLFormElement).reset();
+      $('editor').hidden = false;
+      ($('f-name') as HTMLInputElement).focus();
+    }
+
+    async function openEdit(id: number) {
+      clearFlash();
+      try {
+        const q = await api(API + '/' + id);
+        $('editor-title').textContent = t(locale, 'admin.questions.editor.edit', { id: q.id });
+        ($('f-id') as HTMLInputElement).value = String(q.id);
+        ($('f-enabled') as HTMLInputElement).value = q.enabled === 1 || q.enabled === true ? '1' : '0';
+        ($('f-name') as HTMLInputElement).value = q.name || '';
+        ($('f-text') as HTMLTextAreaElement).value = q.text || '';
+        ($('f-objective') as HTMLTextAreaElement).value = q.objective || '';
+        $('editor').hidden = false;
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
+    async function remove(id: number, name: string) {
+      if (!confirm(t(locale, 'admin.questions.confirm_delete', { name }))) return;
+      try {
+        await api(API + '/' + id, { method: 'DELETE' });
+        flash(t(locale, 'admin.questions.msg.deleted'));
+        loadList();
+      } catch (e: any) {
+        // 409 when the question is still enabled — surface the API message verbatim.
+        flash(e.message, false);
+      }
+    }
+
+    ($('form') as HTMLFormElement).addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const id = ($('f-id') as HTMLInputElement).value;
+      const payload: any = {
+        name: ($('f-name') as HTMLInputElement).value.trim(),
+        text: ($('f-text') as HTMLTextAreaElement).value,
+        objective: ($('f-objective') as HTMLTextAreaElement).value.trim() || null,
+      };
+      // Preserve the existing enabled state on edit; new questions default enabled.
+      if (id) payload.enabled = ($('f-enabled') as HTMLInputElement).value === '1';
+      try {
+        if (id) {
+          await api(API + '/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: q.name,
-              text: q.text,
-              objective: q.objective ?? null,
-              enabled,
-            }),
+            body: JSON.stringify(payload),
           });
-          flash(enabled ? 'Enabled.' : 'Disabled.');
-          loadList();
-        } catch (e) {
-          flash(e.message, false);
+          flash(t(locale, 'admin.questions.msg.saved'));
+        } else {
+          await api(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          flash(t(locale, 'admin.questions.msg.created'));
         }
+        $('editor').hidden = true;
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
       }
+    });
 
-      function openNew() {
-        clearFlash();
-        $('editor-title').textContent = 'New question';
-        $('f-id').value = '';
-        $('f-enabled').value = '';
-        $('form').reset();
-        $('editor').hidden = false;
-        $('f-name').focus();
-      }
+    ($('btn-new') as HTMLButtonElement).onclick = openNew;
+    ($('btn-cancel') as HTMLButtonElement).onclick = () => {
+      $('editor').hidden = true;
+      clearFlash();
+    };
 
-      async function openEdit(id) {
-        clearFlash();
-        try {
-          const q = await api(API + '/' + id);
-          $('editor-title').textContent = 'Edit question #' + q.id;
-          $('f-id').value = q.id;
-          $('f-enabled').value = (q.enabled === 1 || q.enabled === true) ? '1' : '0';
-          $('f-name').value = q.name || '';
-          $('f-text').value = q.text || '';
-          $('f-objective').value = q.objective || '';
-          $('editor').hidden = false;
-          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        } catch (e) {
-          flash(e.message, false);
-        }
-      }
-
-      async function remove(id, name) {
-        if (!confirm('Delete question "' + name + '"?')) return;
-        try {
-          await api(API + '/' + id, { method: 'DELETE' });
-          flash('Deleted.');
-          loadList();
-        } catch (e) {
-          // 409 when the question is still enabled — surface the API message verbatim.
-          flash(e.message, false);
-        }
-      }
-
-      $('form').addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const id = $('f-id').value;
-        const payload = {
-          name: $('f-name').value.trim(),
-          text: $('f-text').value,
-          objective: $('f-objective').value.trim() || null,
-        };
-        // Preserve the existing enabled state on edit; new questions default enabled.
-        if (id) payload.enabled = $('f-enabled').value === '1';
-        try {
-          if (id) {
-            await api(API + '/' + id, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            flash('Saved.');
-          } else {
-            await api(API, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            flash('Created.');
-          }
-          $('editor').hidden = true;
-          loadList();
-        } catch (e) {
-          flash(e.message, false);
-        }
-      });
-
-      $('btn-new').onclick = openNew;
-      $('btn-cancel').onclick = () => { $('editor').hidden = true; clearFlash(); };
-
-      loadList();
-    </script>
-
-    <style>
-      :global(body) {
-        margin: 0;
-        background: #0b0c10;
-        color: #e8eaed;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      }
-      main { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; }
-      header { display: flex; align-items: baseline; gap: 20px; margin-bottom: 20px; }
-      h1 { margin: 0; font-size: 1.5rem; }
-      h2 { font-size: 1.1rem; margin: 0; }
-      .back { color: #6b7280; font-size: 0.85rem; text-decoration: none; }
-      .back:hover { color: #9aa0aa; }
-
-      .status { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; font-size: 0.9rem; }
-      .status.ok { background: #052e22; color: #a7f3d0; border: 1px solid #10b981; }
-      .status.err { background: #2e0808; color: #fca5a5; border: 1px solid #ef4444; }
-
-      .list-head {
-        display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
-      }
-      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-      thead th {
-        text-align: left; padding: 8px 12px; color: #6b7280; font-weight: 600;
-        font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
-        border-bottom: 1px solid #2a2c36;
-      }
-      tbody tr { border-bottom: 1px solid #1c1e27; }
-      tbody tr:hover { background: #12131a; }
-      td { padding: 10px 12px; vertical-align: middle; }
-      .name { font-weight: 600; }
-      .muted { color: #4b5563; }
-      .err { color: #fca5a5; }
-      .hint { color: #6b7280; font-size: 0.8rem; margin-top: 10px; }
-      .action { text-align: right; white-space: nowrap; }
-      .action .btn { margin-left: 6px; }
-
-      .badge {
-        padding: 2px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 0.04em;
-      }
-      .badge.on { background: #10b981; color: #04150f; }
-      .badge.off { background: #374151; color: #cbd5e1; }
-
-      .editor {
-        margin-top: 32px; padding: 20px; border: 1px solid #2a2c36;
-        border-radius: 12px; background: #12131a;
-      }
-      form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
-      label { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: #cbd5e1; }
-      .req { color: #f87171; }
-      input[type='text'], textarea {
-        padding: 9px 12px; font-size: 0.95rem; color: #e8eaed;
-        background: #17181f; border: 1px solid #2a2c36; border-radius: 8px; font-family: inherit;
-      }
-      textarea { resize: vertical; }
-      .actions { display: flex; gap: 10px; margin-top: 4px; }
-
-      .btn {
-        padding: 8px 16px; font-size: 0.9rem; font-weight: 600; color: #e8eaed;
-        background: #24262f; border: 1px solid #2a2c36; border-radius: 8px;
-        cursor: pointer; transition: filter 0.15s;
-      }
-      .btn:hover { filter: brightness(1.15); }
-      .btn.primary { color: #04150f; background: #10b981; border-color: transparent; }
-      .btn.small { padding: 4px 12px; font-size: 0.8rem; }
-      .btn.danger { color: #fca5a5; border-color: #7f1d1d; }
-      .btn.danger:hover { background: #2e0808; }
-    </style>
-  </body>
-</html>
+    loadList();
+  </script>
+</AdminLayout>

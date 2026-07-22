@@ -1,119 +1,59 @@
 ---
-// Operator admin hub. Links to the three CRUD sections (prompts, questions,
-// templates) that manage the interview catalog via the /api/admin/* JSON API.
-// The whole /admin area sits behind the password middleware, so no auth here.
+// Operator admin hub. A considered landing that links to the four sections
+// (prompts, questions, templates, sessions), each with a one-line description and
+// its current count resolved server-side. The whole /admin area sits behind the
+// password middleware, so no auth here.
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../../lib/i18n';
+import { countPrompts, countQuestions, countTemplates, listSessions } from '../../lib/db';
+
 export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
+
+// Human-friendly count label with singular / zero variants.
+function countLabel(n: number): string {
+  if (n === 0) return t(locale, 'admin.hub.count_zero');
+  if (n === 1) return t(locale, 'admin.hub.count_one');
+  return t(locale, 'admin.hub.count', { n });
+}
+
+const sections = [
+  { key: 'prompts', href: '/admin/prompts', count: countPrompts() },
+  { key: 'questions', href: '/admin/questions', count: countQuestions() },
+  { key: 'templates', href: '/admin/templates', count: countTemplates() },
+  { key: 'sessions', href: '/admin/sessions', count: listSessions().length },
+] as const;
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Admin — BEAI</title>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>Admin</h1>
-        <a href="/" class="back">← Home</a>
-      </header>
+<AdminLayout title={t(locale, 'admin.title')}>
+  <div class="mb-10">
+    <h1 class="text-2xl font-semibold tracking-tight">{t(locale, 'admin.title')}</h1>
+    <p class="mt-2 max-w-2xl text-muted">{t(locale, 'admin.subtitle')}</p>
+  </div>
 
-      <p class="intro">
-        Manage the interview catalog: persona prompts, the question bank, and the
-        experiment templates that combine ordered questions with provider config.
-      </p>
-
-      <nav class="cards">
-        <a href="/admin/prompts" class="card">
-          <h2>Prompts</h2>
-          <p>Persona prompts and scripts (title, body, greeting, language, notes).</p>
+  <div class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+    {
+      sections.map((s) => (
+        <a
+          href={s.href}
+          class="group flex items-center gap-5 px-5 py-5 transition-colors hover:bg-panel"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="flex items-baseline gap-3">
+              <span class="text-base font-semibold text-fg">{t(locale, `admin.nav.${s.key}`)}</span>
+              <span class="text-xs text-faint tabular-nums">{countLabel(s.count)}</span>
+            </div>
+            <p class="mt-1 text-sm text-muted">{t(locale, `admin.hub.${s.key}.desc`)}</p>
+          </div>
+          <span class="shrink-0 text-sm font-medium text-muted transition-colors group-hover:text-accent">
+            {t(locale, 'admin.hub.open')} <span aria-hidden="true">&rarr;</span>
+          </span>
         </a>
-        <a href="/admin/questions" class="card">
-          <h2>Questions</h2>
-          <p>The interview question bank. Enable/disable and edit questions.</p>
-        </a>
-        <a href="/admin/templates" class="card">
-          <h2>Templates</h2>
-          <p>Experiment recipes: ordered questions plus HeyGen / Tavus provider config.</p>
-        </a>
-      </nav>
-
-      <p class="legacy">
-        <a href="/admin" class="muted">Candidate archive lives on the legacy pages.</a>
-      </p>
-    </main>
-
-    <style>
-      :global(body) {
-        margin: 0;
-        background: #0b0c10;
-        color: #e8eaed;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      }
-      main {
-        max-width: 900px;
-        margin: 0 auto;
-        padding: 32px 20px 64px;
-      }
-      header {
-        display: flex;
-        align-items: baseline;
-        gap: 20px;
-        margin-bottom: 20px;
-      }
-      h1 {
-        margin: 0;
-        font-size: 1.5rem;
-      }
-      .back {
-        color: #6b7280;
-        font-size: 0.85rem;
-        text-decoration: none;
-      }
-      .back:hover { color: #9aa0aa; }
-      .intro {
-        color: #9aa0aa;
-        font-size: 0.95rem;
-        margin: 0 0 28px;
-        max-width: 640px;
-      }
-      .cards {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 16px;
-      }
-      .card {
-        display: block;
-        padding: 20px;
-        border: 1px solid #2a2c36;
-        border-radius: 12px;
-        text-decoration: none;
-        color: inherit;
-        background: #12131a;
-        transition: border-color 0.15s, transform 0.1s;
-      }
-      .card:hover {
-        border-color: #10b981;
-        transform: translateY(-2px);
-      }
-      .card h2 {
-        margin: 0 0 6px;
-        font-size: 1.1rem;
-        color: #a7f3d0;
-      }
-      .card p {
-        margin: 0;
-        font-size: 0.85rem;
-        color: #9aa0aa;
-        line-height: 1.4;
-      }
-      .legacy {
-        margin-top: 32px;
-        font-size: 0.8rem;
-      }
-      .muted { color: #4b5563; text-decoration: none; }
-      .muted:hover { color: #9aa0aa; }
-    </style>
-  </body>
-</html>
+      ))
+    }
+  </div>
+</AdminLayout>

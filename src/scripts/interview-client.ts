@@ -8,6 +8,10 @@ import type { InterviewProvider, ProviderName, TranscriptEntry } from '../provid
 import { HeyGenProvider } from '../providers/heygen';
 import { TavusProvider } from '../providers/tavus';
 import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, warmupCamera } from './proctor';
+import { t, type Locale } from '../lib/i18n';
+
+// SSR set <html lang> from the resolved locale; the client mirrors it for all runtime copy.
+const locale = (document.documentElement.lang || 'it') as Locale;
 
 type Phase = 'idle' | 'connecting' | 'live';
 type Screen = 'start' | 'interview' | 'done';
@@ -97,15 +101,16 @@ let repollTimer: number | null = null;
 let meterStartMs = 0;
 let startCredits: number | null = null;
 
+// Maps a status kind to its i18n key and the CSS data-state used for colouring.
 const STATUS: Record<string, [string, string]> = {
-  idle: ['ready to start', 'idle'],
-  connecting: ['connecting…', 'connecting'],
-  ready: ['ready', 'ready'],
-  listening: ['listening', 'listening'],
-  speaking: ['speaking', 'speaking'],
-  stopped: ['stopped', 'idle'],
-  waiting: ['one moment…', 'waiting'],
-  error: ['error', 'error'],
+  idle: ['interview.status.idle', 'idle'],
+  connecting: ['interview.status.connecting', 'connecting'],
+  ready: ['interview.status.ready', 'ready'],
+  listening: ['interview.status.listening', 'listening'],
+  speaking: ['interview.status.speaking', 'speaking'],
+  stopped: ['interview.status.stopped', 'idle'],
+  waiting: ['interview.status.waiting', 'waiting'],
+  error: ['interview.status.error', 'error'],
 };
 
 // ── Small helpers ─────────────────────────────────────────────────────────────────
@@ -113,8 +118,8 @@ function setScreen(name: Screen): void {
   app.dataset.screen = name;
 }
 function setStatus(kind: string, override?: string): void {
-  const [text, state] = STATUS[kind] ?? STATUS.idle;
-  statusEl.textContent = override ?? text;
+  const [key, state] = STATUS[kind] ?? STATUS.idle;
+  statusEl.textContent = override ?? t(locale, key);
   statusEl.dataset.state = state;
 }
 function selectedProvider(): ProviderName {
@@ -129,7 +134,8 @@ function mmss(totalSeconds: number): string {
 }
 function setButton(): void {
   const live = phase === 'live';
-  button.textContent = phase === 'connecting' ? '… connecting' : '⏹ Stop';
+  button.textContent =
+    phase === 'connecting' ? t(locale, 'interview.button.connecting') : t(locale, 'interview.button.stop');
   button.dataset.on = String(live);
   button.disabled = phase !== 'live';
 }
@@ -165,13 +171,13 @@ async function loadSelectors(): Promise<void> {
     selectorsReady = false;
     promptSelect.innerHTML = '<option value="">—</option>';
     templateSelect.innerHTML = '<option value="">—</option>';
-    startError.textContent = 'Create a prompt and a template in /admin first.';
+    startError.textContent = t(locale, 'interview.error.no_config');
     refreshStartEnabled();
     return;
   }
 
   promptSelect.innerHTML =
-    '<option value="">Select a prompt…</option>' +
+    `<option value="">${escapeHtml(t(locale, 'interview.select.prompt_placeholder'))}</option>` +
     validPrompts
       .map(
         (p) =>
@@ -179,7 +185,7 @@ async function loadSelectors(): Promise<void> {
       )
       .join('');
   templateSelect.innerHTML =
-    '<option value="">Select a template…</option>' +
+    `<option value="">${escapeHtml(t(locale, 'interview.select.template_placeholder'))}</option>` +
     enabledTemplates
       .map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`)
       .join('');
@@ -264,11 +270,11 @@ function renderMeter(): void {
     costUsd = consumed * rates.heygenUsdPerCredit;
     if (startCredits != null) {
       const remaining = Math.max(0, startCredits - consumed);
-      meterCreditsEl.textContent = `${remaining.toFixed(1)} credits`;
+      meterCreditsEl.textContent = t(locale, 'interview.meter.credits', { n: remaining.toFixed(1) });
       meterCreditsEl.dataset.low =
         remaining <= CREDITS_CRITICAL ? 'critical' : remaining <= CREDITS_LOW ? 'true' : 'false';
     } else {
-      meterCreditsEl.textContent = `−${consumed.toFixed(1)} credits`;
+      meterCreditsEl.textContent = t(locale, 'interview.meter.credits_delta', { n: consumed.toFixed(1) });
       meterCreditsEl.dataset.low = 'false';
     }
     meterCreditsEl.hidden = false;
@@ -342,7 +348,7 @@ async function startSession(): Promise<void> {
   const promptId = Number(promptSelect.value);
   const templateId = Number(templateSelect.value);
   if (!consentEl.checked || !promptId || !templateId) {
-    startError.textContent = 'Select a prompt, a template, and accept to continue.';
+    startError.textContent = t(locale, 'interview.error.select_all');
     return;
   }
   providerName = selectedProvider();
@@ -352,7 +358,7 @@ async function startSession(): Promise<void> {
   void enterFullscreen();
 
   if (cameraOk === false) {
-    setStatus('waiting', 'Move closer to the webcam to begin');
+    setStatus('waiting', t(locale, 'interview.waiting.move_closer'));
     // The warmup callback re-triggers connect once the face is close enough is not
     // automatic here — the operator restarts via Stop → Start another. Keep it simple:
     // proceed anyway (null/false only delays, never blocks the test tool).
@@ -365,7 +371,7 @@ async function startSession(): Promise<void> {
   try {
     await ensureMicPermission();
   } catch {
-    setStatus('error', 'microphone permission denied');
+    setStatus('error', t(locale, 'interview.error.mic_denied'));
     await teardown('error');
     goHome();
     return;
@@ -397,10 +403,11 @@ async function startSession(): Promise<void> {
       setStatus('connecting');
     }
     if (res.status === 429 || data?.code === 'provider_busy') {
-      setStatus('error', data?.error ?? 'Provider busy. Try again in a few seconds.');
+      const busyMsg = data?.error ?? t(locale, 'interview.error.provider_busy');
+      setStatus('error', busyMsg);
       await teardown('error');
       goHome();
-      startError.textContent = data?.error ?? 'Provider busy. Try again in a few seconds.';
+      startError.textContent = busyMsg;
       return;
     }
     if (!res.ok || !data?.dbSessionId) throw new Error(data?.error ?? `start HTTP ${res.status}`);
@@ -412,7 +419,8 @@ async function startSession(): Promise<void> {
     ending = false;
     provider.on('transcript', (p) => {
       const entry = p as TranscriptEntry;
-      captionEl.textContent = `${entry.role === 'avatar' ? 'Avatar' : 'You'}: ${entry.text}`;
+      const who = t(locale, entry.role === 'avatar' ? 'interview.speaker.avatar' : 'interview.speaker.you');
+      captionEl.textContent = `${who}: ${entry.text}`;
       void persist(entry);
     });
     provider.on('state', (s) => {
@@ -430,7 +438,7 @@ async function startSession(): Promise<void> {
     });
     provider.on('error', (e) => {
       if (ending) return;
-      setStatus('error', `error: ${String(e)}`);
+      setStatus('error', t(locale, 'interview.status.error_prefix', { msg: String(e) }));
       void onProviderError();
     });
 
@@ -451,10 +459,11 @@ async function startSession(): Promise<void> {
     );
     startProctor(sessionId!); // soft, silent integrity collector (provider-agnostic)
   } catch (err) {
-    setStatus('error', `error: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    setStatus('error', t(locale, 'interview.status.error_prefix', { msg }));
     await teardown('error');
     goHome();
-    startError.textContent = err instanceof Error ? err.message : String(err);
+    startError.textContent = msg;
   }
 }
 
@@ -504,7 +513,7 @@ async function onTimeout(): Promise<void> {
   if (phase !== 'live') return;
   clearTimer();
   const sid = sessionId;
-  setStatus('error', 'time is up');
+  setStatus('error', t(locale, 'interview.time_up'));
   await teardown('timeout');
   showDone(sid);
 }

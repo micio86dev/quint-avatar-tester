@@ -3,608 +3,568 @@
 // enabled) + an ordered selection of enabled questions + two provider-config blobs
 // (HeyGen / Tavus). The editor has three parts; membership is saved via the dedicated
 // /questions membership endpoint, meta+config via the template PUT. Vanilla fetch.
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { resolveLocale, t, LOCALE_COOKIE, type Locale } from '../../lib/i18n';
+
 export const prerender = false;
+
+const locale: Locale = resolveLocale(
+  Astro.cookies.get(LOCALE_COOKIE)?.value,
+  Astro.request.headers.get('accept-language'),
+);
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Templates — Admin</title>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>Templates</h1>
-        <a href="/admin" class="back">← Admin</a>
-      </header>
+<AdminLayout section="templates" title={t(locale, 'admin.nav.templates')}>
+  <div class="mb-8 flex items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">{t(locale, 'admin.nav.templates')}</h1>
+      <p class="mt-1 text-sm text-muted">{t(locale, 'admin.hub.templates.desc')}</p>
+    </div>
+    <button type="button" id="btn-new" class="btn btn-primary shrink-0">
+      {t(locale, 'admin.templates.new')}
+    </button>
+  </div>
 
-      <p id="status" class="status" hidden></p>
+  <p id="status" class="mb-5 hidden rounded-md px-4 py-2.5 text-sm" role="status"></p>
 
-      <section class="list-section">
-        <div class="list-head">
-          <h2>Templates</h2>
-          <button type="button" id="btn-new" class="btn primary">+ New template</button>
+  <section class="card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-border text-left text-xs uppercase tracking-wide text-faint">
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.templates.col.name')}</th>
+          <th class="px-5 py-3 font-medium">{t(locale, 'admin.templates.col.status')}</th>
+          <th class="px-5 py-3"></th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="3" class="px-5 py-6 text-muted">{t(locale, 'action.loading')}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="editor" class="card mt-8 p-6" hidden>
+    <h2 id="editor-title" class="mb-4 text-lg font-semibold">{t(locale, 'admin.templates.editor.new')}</h2>
+    <input type="hidden" id="f-id" />
+
+    <!-- Part A — Meta -->
+    <fieldset class="mb-6 rounded-lg border border-border p-5">
+      <legend class="px-2 text-xs font-semibold uppercase tracking-wide text-accent">
+        {t(locale, 'admin.templates.section.meta')}
+      </legend>
+      <div class="field">
+        <label class="label" for="f-name">{t(locale, 'admin.templates.field.name')} <span class="text-danger">*</span></label>
+        <input type="text" id="f-name" class="input" required />
+      </div>
+      <div class="field">
+        <label class="label" for="f-description">{t(locale, 'admin.templates.field.description')}</label>
+        <textarea id="f-description" class="input min-h-16" rows="2"></textarea>
+      </div>
+      <label class="flex items-center gap-2 text-sm font-medium text-fg">
+        <input type="checkbox" id="f-enabled" class="size-4 accent-[var(--color-accent)]" />
+        <span>{t(locale, 'admin.templates.field.enabled')}</span>
+      </label>
+    </fieldset>
+
+    <!-- Part B — Ordered questions -->
+    <fieldset class="mb-6 rounded-lg border border-border p-5">
+      <legend class="px-2 text-xs font-semibold uppercase tracking-wide text-accent">
+        {t(locale, 'admin.templates.section.questions')}
+      </legend>
+      <p class="hint mb-3" id="mem-hint">{t(locale, 'admin.templates.mem.hint')}</p>
+      <div id="mem-area" hidden>
+        <div class="mb-3 flex gap-2">
+          <select id="mem-select" class="input flex-1"></select>
+          <button type="button" id="btn-add-q" class="btn btn-ghost btn-sm shrink-0">
+            {t(locale, 'admin.templates.mem.add')}
+          </button>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="rows">
-            <tr><td colspan="3" class="muted">Loading…</td></tr>
-          </tbody>
-        </table>
-      </section>
+        <ol id="mem-list" class="mb-3 flex flex-col gap-1.5"></ol>
+        <button type="button" id="btn-save-questions" class="btn btn-ghost btn-sm">
+          {t(locale, 'admin.templates.mem.save')}
+        </button>
+      </div>
+    </fieldset>
 
-      <section id="editor" class="editor" hidden>
-        <h2 id="editor-title">New template</h2>
-        <input type="hidden" id="f-id" />
+    <!-- Part C — Provider config -->
+    <fieldset class="mb-6 rounded-lg border border-border p-5">
+      <legend class="px-2 text-xs font-semibold uppercase tracking-wide text-accent">
+        {t(locale, 'admin.templates.section.heygen')}
+      </legend>
+      <p class="hint mb-4">{t(locale, 'admin.templates.heygen.hint')}</p>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-5 gap-y-4" id="heygen-fields"></div>
+    </fieldset>
 
-        <!-- Part A — Meta -->
-        <fieldset>
-          <legend>Meta</legend>
-          <label>Name <span class="req">*</span>
-            <input type="text" id="f-name" required />
-          </label>
-          <label>Description
-            <textarea id="f-description" rows="2"></textarea>
-          </label>
-          <label class="inline">
-            <input type="checkbox" id="f-enabled" />
-            <span>Enabled</span>
-          </label>
-        </fieldset>
+    <fieldset class="mb-6 rounded-lg border border-border p-5">
+      <legend class="px-2 text-xs font-semibold uppercase tracking-wide text-accent">
+        {t(locale, 'admin.templates.section.tavus')}
+      </legend>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-5 gap-y-4" id="tavus-fields"></div>
+    </fieldset>
 
-        <!-- Part B — Ordered questions -->
-        <fieldset>
-          <legend>Questions (ordered)</legend>
-          <p class="hint" id="mem-hint">Save the template first, then manage its questions.</p>
-          <div id="mem-area" hidden>
-            <div class="mem-add">
-              <select id="mem-select"></select>
-              <button type="button" id="btn-add-q" class="btn small">Add</button>
-            </div>
-            <ol id="mem-list" class="mem-list"></ol>
-            <button type="button" id="btn-save-questions" class="btn">Save question order</button>
-          </div>
-        </fieldset>
+    <div class="flex gap-3">
+      <button type="button" id="btn-save" class="btn btn-primary">{t(locale, 'admin.templates.save')}</button>
+      <button type="button" id="btn-cancel" class="btn btn-ghost">{t(locale, 'action.cancel')}</button>
+    </div>
+  </section>
 
-        <!-- Part C — Provider config -->
-        <fieldset>
-          <legend>HeyGen config</legend>
-          <p class="hint">FULL mode does not expose an LLM temperature, so it is omitted here.</p>
-          <div class="grid" id="heygen-fields"></div>
-        </fieldset>
+  <script>
+    import { t, type Locale } from '../../lib/i18n';
 
-        <fieldset>
-          <legend>Tavus config</legend>
-          <div class="grid" id="tavus-fields"></div>
-        </fieldset>
+    const locale = (document.documentElement.lang || 'it') as Locale;
+    const API = '/api/admin/templates';
+    const QAPI = '/api/admin/questions';
+    const $ = (id: string) => document.getElementById(id) as HTMLElement;
+    const statusEl = $('status');
 
-        <div class="actions">
-          <button type="button" id="btn-save" class="btn primary">Save template</button>
-          <button type="button" id="btn-cancel" class="btn">Cancel</button>
-        </div>
-      </section>
-    </main>
+    function flash(msg: string, ok = true) {
+      statusEl.hidden = false;
+      statusEl.textContent = msg;
+      statusEl.className =
+        'mb-5 rounded-md px-4 py-2.5 text-sm ' +
+        (ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger');
+    }
+    function clearFlash() {
+      statusEl.hidden = true;
+    }
 
-    <script is:inline>
-      const API = '/api/admin/templates';
-      const QAPI = '/api/admin/questions';
-      const $ = (id) => document.getElementById(id);
-      const statusEl = $('status');
-
-      function flash(msg, ok = true) {
-        statusEl.hidden = false;
-        statusEl.textContent = msg;
-        statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+    async function api(url: string, opts?: RequestInit) {
+      const res = await fetch(url, opts);
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        /* 204 */
       }
-      function clearFlash() { statusEl.hidden = true; }
+      if (!res.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
+      return data;
+    }
 
-      async function api(url, opts) {
-        const res = await fetch(url, opts);
-        let data = null;
-        try { data = await res.json(); } catch { /* 204 */ }
-        if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-        return data;
+    // ── Adaptive provider-config field definitions ──────────────────────────────
+    // Each entry: { key, label, type, options?, min?, max?, step?, hint? }.
+    // These keys ARE the object keys serialized into heygenConfig / tavusConfig.
+    type FieldDef = {
+      key: string;
+      label: string;
+      type: 'text' | 'number' | 'select' | 'checkbox';
+      options?: string[];
+      min?: number;
+      max?: number;
+      step?: number;
+      hint?: string;
+    };
+
+    const HEYGEN_FIELDS: FieldDef[] = [
+      { key: 'avatarId', label: 'Avatar ID', type: 'text' },
+      { key: 'language', label: 'Language', type: 'text', hint: 'e.g. it / en' },
+      { key: 'interactivityType', label: 'Interactivity', type: 'select', options: ['CONVERSATIONAL', 'PUSH_TO_TALK'] },
+      { key: 'maxSessionDurationSec', label: 'Max session (sec)', type: 'number', hint: 'Essential plan ~1200s / 20min' },
+      { key: 'videoQuality', label: 'Video quality', type: 'select', options: ['very_high', 'high', 'medium', 'low'] },
+      { key: 'videoEncoding', label: 'Video encoding', type: 'select', options: ['H264', 'VP8'] },
+      { key: 'voiceId', label: 'Voice ID', type: 'text' },
+      { key: 'voiceProvider', label: 'Voice provider', type: 'select', options: ['elevenLabs', 'fish'] },
+      { key: 'voiceSpeed', label: 'Voice speed', type: 'number', min: 0.8, max: 1.2, step: 0.01 },
+      { key: 'voiceStability', label: 'Voice stability', type: 'number', min: 0, max: 1, step: 0.01 },
+      { key: 'voiceSimilarityBoost', label: 'Voice similarity boost', type: 'number', min: 0, max: 1, step: 0.01 },
+      { key: 'voiceStyle', label: 'Voice style', type: 'number', min: 0, max: 1, step: 0.01 },
+      { key: 'voiceUseSpeakerBoost', label: 'Use speaker boost', type: 'checkbox' },
+    ];
+
+    const TAVUS_FIELDS: FieldDef[] = [
+      { key: 'palId', label: 'Persona (pal) ID', type: 'text' },
+      { key: 'faceId', label: 'Face ID', type: 'text' },
+      { key: 'language', label: 'Language', type: 'text', hint: 'e.g. english / multilingual' },
+      { key: 'audioOnly', label: 'Audio only', type: 'checkbox' },
+      { key: 'maxCallDurationSec', label: 'Max call (sec)', type: 'number', hint: 'default 3600' },
+      { key: 'participantAbsentTimeoutSec', label: 'Absent timeout (sec)', type: 'number', hint: 'default 300' },
+      { key: 'enableRecording', label: 'Enable recording', type: 'checkbox' },
+      { key: 'enableClosedCaptions', label: 'Closed captions', type: 'checkbox' },
+      { key: 'llmModel', label: 'LLM model', type: 'select', options: ['tavus-gemma-4', 'tavus-gemma-4-thinking', 'tavus-gpt-5.6-sol', 'tavus-gpt-5.6-terra', 'tavus-gemini-2.5-flash'] },
+      { key: 'llmTemperature', label: 'LLM temperature', type: 'number', min: 0, max: 2, step: 0.01 },
+      { key: 'llmSpeculativeInference', label: 'Speculative inference', type: 'checkbox' },
+      { key: 'ttsEngine', label: 'TTS engine', type: 'select', options: ['tavus-auto', 'cartesia', 'elevenlabs', 'azure'] },
+      { key: 'ttsExternalVoiceId', label: 'TTS external voice ID', type: 'text' },
+      { key: 'turnTakingPatience', label: 'Turn-taking patience', type: 'select', options: ['low', 'medium', 'high'] },
+      { key: 'interruptibility', label: 'Interruptibility', type: 'select', options: ['low', 'medium', 'high'] },
+      { key: 'voiceIsolation', label: 'Voice isolation', type: 'select', options: ['near', 'off'] },
+      { key: 'idleEngagement', label: 'Idle engagement', type: 'select', options: ['off', 'patient', 'eager'] },
+    ];
+
+    // Build the form controls for a config section. Empty option lets selects be "unset".
+    function buildFields(container: HTMLElement, fields: FieldDef[]) {
+      container.innerHTML = '';
+      for (const f of fields) {
+        const wrap = document.createElement('div');
+        wrap.className = f.type === 'checkbox' ? 'flex items-center gap-2' : 'flex flex-col gap-1.5';
+
+        const cap = document.createElement('label');
+        cap.className = 'text-sm font-medium text-fg';
+        cap.textContent = f.label;
+        if (f.hint) {
+          const h = document.createElement('span');
+          h.className = 'ml-1 text-xs font-normal text-faint';
+          h.textContent = f.hint;
+          cap.appendChild(h);
+        }
+
+        let input: HTMLInputElement | HTMLSelectElement;
+        if (f.type === 'select') {
+          input = document.createElement('select');
+          input.className = 'input';
+          const blank = document.createElement('option');
+          blank.value = '';
+          blank.textContent = '—';
+          input.appendChild(blank);
+          for (const o of f.options ?? []) {
+            const opt = document.createElement('option');
+            opt.value = o;
+            opt.textContent = o;
+            input.appendChild(opt);
+          }
+        } else if (f.type === 'checkbox') {
+          input = document.createElement('input');
+          input.type = 'checkbox';
+          input.className = 'size-4 accent-[var(--color-accent)]';
+        } else if (f.type === 'number') {
+          input = document.createElement('input');
+          input.type = 'number';
+          input.className = 'input';
+          if (f.min !== undefined) input.min = String(f.min);
+          if (f.max !== undefined) input.max = String(f.max);
+          if (f.step !== undefined) input.step = String(f.step);
+        } else {
+          input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'input';
+        }
+        input.dataset.key = f.key;
+        input.dataset.type = f.type;
+
+        if (f.type === 'checkbox') {
+          // Checkbox layout: control then label on one row.
+          wrap.append(input, cap);
+        } else {
+          wrap.append(cap, input);
+        }
+        container.appendChild(wrap);
       }
+    }
 
-      // ── Adaptive provider-config field definitions ──────────────────────────────
-      // Each entry: { key, label, type, options?, min?, max?, step?, hint? }.
-      // These keys ARE the object keys serialized into heygenConfig / tavusConfig.
-      const HEYGEN_FIELDS = [
-        { key: 'avatarId', label: 'Avatar ID', type: 'text' },
-        { key: 'language', label: 'Language', type: 'text', hint: 'e.g. it / en' },
-        { key: 'interactivityType', label: 'Interactivity', type: 'select', options: ['CONVERSATIONAL', 'PUSH_TO_TALK'] },
-        { key: 'maxSessionDurationSec', label: 'Max session (sec)', type: 'number', hint: 'Essential plan ~1200s / 20min' },
-        { key: 'videoQuality', label: 'Video quality', type: 'select', options: ['very_high', 'high', 'medium', 'low'] },
-        { key: 'videoEncoding', label: 'Video encoding', type: 'select', options: ['H264', 'VP8'] },
-        { key: 'voiceId', label: 'Voice ID', type: 'text' },
-        { key: 'voiceProvider', label: 'Voice provider', type: 'select', options: ['elevenLabs', 'fish'] },
-        { key: 'voiceSpeed', label: 'Voice speed', type: 'number', min: 0.8, max: 1.2, step: 0.01 },
-        { key: 'voiceStability', label: 'Voice stability', type: 'number', min: 0, max: 1, step: 0.01 },
-        { key: 'voiceSimilarityBoost', label: 'Voice similarity boost', type: 'number', min: 0, max: 1, step: 0.01 },
-        { key: 'voiceStyle', label: 'Voice style', type: 'number', min: 0, max: 1, step: 0.01 },
-        { key: 'voiceUseSpeakerBoost', label: 'Use speaker boost', type: 'checkbox' },
-      ];
+    // Populate a config section from a stored object (missing keys → left blank/default).
+    function fillFields(container: HTMLElement, obj: Record<string, unknown> | null) {
+      obj = obj || {};
+      container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-key]').forEach((el) => {
+        const key = el.dataset.key as string;
+        const has = Object.prototype.hasOwnProperty.call(obj, key);
+        if (el.dataset.type === 'checkbox') {
+          (el as HTMLInputElement).checked = has ? !!obj![key] : false;
+        } else {
+          el.value = has && obj![key] != null ? String(obj![key]) : '';
+        }
+      });
+    }
 
-      const TAVUS_FIELDS = [
-        { key: 'palId', label: 'Persona (pal) ID', type: 'text' },
-        { key: 'faceId', label: 'Face ID', type: 'text' },
-        { key: 'language', label: 'Language', type: 'text', hint: 'e.g. english / multilingual' },
-        { key: 'audioOnly', label: 'Audio only', type: 'checkbox' },
-        { key: 'maxCallDurationSec', label: 'Max call (sec)', type: 'number', hint: 'default 3600' },
-        { key: 'participantAbsentTimeoutSec', label: 'Absent timeout (sec)', type: 'number', hint: 'default 300' },
-        { key: 'enableRecording', label: 'Enable recording', type: 'checkbox' },
-        { key: 'enableClosedCaptions', label: 'Closed captions', type: 'checkbox' },
-        { key: 'llmModel', label: 'LLM model', type: 'select', options: ['tavus-gemma-4', 'tavus-gemma-4-thinking', 'tavus-gpt-5.6-sol', 'tavus-gpt-5.6-terra', 'tavus-gemini-2.5-flash'] },
-        { key: 'llmTemperature', label: 'LLM temperature', type: 'number', min: 0, max: 2, step: 0.01 },
-        { key: 'llmSpeculativeInference', label: 'Speculative inference', type: 'checkbox' },
-        { key: 'ttsEngine', label: 'TTS engine', type: 'select', options: ['tavus-auto', 'cartesia', 'elevenlabs', 'azure'] },
-        { key: 'ttsExternalVoiceId', label: 'TTS external voice ID', type: 'text' },
-        { key: 'turnTakingPatience', label: 'Turn-taking patience', type: 'select', options: ['low', 'medium', 'high'] },
-        { key: 'interruptibility', label: 'Interruptibility', type: 'select', options: ['low', 'medium', 'high'] },
-        { key: 'voiceIsolation', label: 'Voice isolation', type: 'select', options: ['near', 'off'] },
-        { key: 'idleEngagement', label: 'Idle engagement', type: 'select', options: ['off', 'patient', 'eager'] },
-      ];
-
-      // Build the form controls for a config section. Empty option lets selects be "unset".
-      function buildFields(container, fields) {
-        container.innerHTML = '';
-        for (const f of fields) {
-          const wrap = document.createElement('label');
-          wrap.className = 'field field-' + f.type;
-          const cap = document.createElement('span');
-          cap.className = 'field-label';
-          cap.textContent = f.label;
-          if (f.hint) {
-            const h = document.createElement('em');
-            h.className = 'field-hint';
-            h.textContent = ' ' + f.hint;
-            cap.appendChild(h);
+    // Serialize a config section into an object. Empty text/number/select fields are
+    // OMITTED entirely (not stored as ''). Checkboxes always serialize as booleans.
+    // Returns null when nothing was set, so we don't persist an empty {} blob.
+    function collectFields(container: HTMLElement): Record<string, unknown> | null {
+      const out: Record<string, unknown> = {};
+      container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-key]').forEach((el) => {
+        const key = el.dataset.key as string;
+        const type = el.dataset.type;
+        if (type === 'checkbox') {
+          out[key] = (el as HTMLInputElement).checked;
+        } else if (type === 'number') {
+          const v = el.value.trim();
+          if (v !== '') {
+            const n = Number(v);
+            if (!Number.isNaN(n)) out[key] = n;
           }
+        } else {
+          const v = el.value.trim();
+          if (v !== '') out[key] = v;
+        }
+      });
+      return Object.keys(out).length ? out : null;
+    }
 
-          let input;
-          if (f.type === 'select') {
-            input = document.createElement('select');
-            const blank = document.createElement('option');
-            blank.value = '';
-            blank.textContent = '—';
-            input.appendChild(blank);
-            for (const o of f.options) {
-              const opt = document.createElement('option');
-              opt.value = o;
-              opt.textContent = o;
-              input.appendChild(opt);
-            }
-          } else if (f.type === 'checkbox') {
-            input = document.createElement('input');
-            input.type = 'checkbox';
-          } else if (f.type === 'number') {
-            input = document.createElement('input');
-            input.type = 'number';
-            if (f.min !== undefined) input.min = f.min;
-            if (f.max !== undefined) input.max = f.max;
-            if (f.step !== undefined) input.step = f.step;
-          } else {
-            input = document.createElement('input');
-            input.type = 'text';
-          }
-          input.dataset.key = f.key;
-          input.dataset.type = f.type;
+    // ── List ────────────────────────────────────────────────────────────────────
+    async function loadList() {
+      const rows = $('rows');
+      try {
+        const list = await api(API);
+        if (!list.length) {
+          rows.innerHTML =
+            '<tr><td colspan="3" class="px-5 py-10 text-center"><span class="block font-medium text-fg">' +
+            t(locale, 'admin.templates.empty.title') +
+            '</span><span class="mt-1 block text-sm text-muted">' +
+            t(locale, 'admin.templates.empty.hint') +
+            '</span></td></tr>';
+          return;
+        }
+        rows.innerHTML = '';
+        for (const tpl of list) {
+          const on = tpl.enabled === 1 || tpl.enabled === true;
+          const tr = document.createElement('tr');
+          tr.className = 'border-b border-border last:border-0 hover:bg-panel';
 
-          if (f.type === 'checkbox') {
-            // Checkbox layout: control then label on one row.
-            wrap.classList.add('inline');
-            wrap.append(input, cap);
-          } else {
-            wrap.append(cap, input);
-          }
-          container.appendChild(wrap);
+          const name = document.createElement('td');
+          name.className = 'px-5 py-3 font-medium text-fg';
+          name.textContent = tpl.name;
+
+          const st = document.createElement('td');
+          st.className = 'px-5 py-3';
+          const badge = document.createElement('span');
+          badge.className = 'badge ' + (on ? 'badge-on' : 'badge-off');
+          badge.textContent = on ? t(locale, 'state.enabled') : t(locale, 'state.disabled');
+          st.appendChild(badge);
+
+          const act = document.createElement('td');
+          act.className = 'px-5 py-3 text-right whitespace-nowrap';
+          const edit = document.createElement('button');
+          edit.className = 'btn btn-ghost btn-sm';
+          edit.textContent = t(locale, 'action.edit');
+          edit.onclick = () => openEdit(tpl.id);
+          const del = document.createElement('button');
+          del.className = 'btn btn-danger btn-sm ml-1.5';
+          del.textContent = t(locale, 'action.delete');
+          del.onclick = () => remove(tpl.id, tpl.name);
+          act.append(edit, del);
+
+          tr.append(name, st, act);
+          rows.appendChild(tr);
+        }
+      } catch (e: any) {
+        rows.innerHTML = '<tr><td colspan="3" class="px-5 py-6 text-danger">' + e.message + '</td></tr>';
+      }
+    }
+
+    // ── Ordered membership editor ────────────────────────────────────────────────
+    // enabledQuestions: id -> { id, name } for all currently-enabled questions.
+    // memberIds: ordered array of selected question ids (the working state).
+    let enabledQuestions = new Map<number, { id: number; name: string }>();
+    let memberIds: number[] = [];
+
+    async function loadEnabledQuestions() {
+      const list = await api(QAPI);
+      enabledQuestions = new Map();
+      for (const q of list) {
+        if (q.enabled === 1 || q.enabled === true) {
+          enabledQuestions.set(q.id, { id: q.id, name: q.name });
+        }
+      }
+    }
+
+    function renderMembership() {
+      // The add-select shows only enabled questions not already in the list.
+      const sel = $('mem-select') as HTMLSelectElement;
+      sel.innerHTML = '';
+      const available = [...enabledQuestions.values()].filter((q) => !memberIds.includes(q.id));
+      if (!available.length) {
+        const o = document.createElement('option');
+        o.value = '';
+        o.textContent = t(locale, 'admin.templates.mem.none_available');
+        sel.appendChild(o);
+        ($('btn-add-q') as HTMLButtonElement).disabled = true;
+      } else {
+        ($('btn-add-q') as HTMLButtonElement).disabled = false;
+        for (const q of available) {
+          const o = document.createElement('option');
+          o.value = String(q.id);
+          o.textContent = q.name;
+          sel.appendChild(o);
         }
       }
 
-      // Populate a config section from a stored object (missing keys → left blank/default).
-      function fillFields(container, obj) {
-        obj = obj || {};
-        container.querySelectorAll('[data-key]').forEach((el) => {
-          const key = el.dataset.key;
-          const has = Object.prototype.hasOwnProperty.call(obj, key);
-          if (el.dataset.type === 'checkbox') {
-            el.checked = has ? !!obj[key] : false;
-          } else {
-            el.value = has && obj[key] != null ? String(obj[key]) : '';
-          }
+      const list = $('mem-list');
+      list.innerHTML = '';
+      if (!memberIds.length) {
+        const li = document.createElement('li');
+        li.className = 'list-none text-sm text-muted';
+        li.textContent = t(locale, 'admin.templates.mem.empty');
+        list.appendChild(li);
+        return;
+      }
+      memberIds.forEach((id, i) => {
+        const meta = enabledQuestions.get(id);
+        const li = document.createElement('li');
+        li.className =
+          'flex items-center justify-between gap-3 rounded-md border border-border bg-panel px-3 py-2';
+        const label = document.createElement('span');
+        label.className = 'text-sm';
+        // A member id may no longer be enabled (e.g. disabled after selection) — flag it.
+        label.textContent = meta ? meta.name : t(locale, 'admin.templates.mem.not_enabled', { id });
+        if (!meta) label.classList.add('text-danger');
+        const ctrl = document.createElement('span');
+        ctrl.className = 'flex gap-1 whitespace-nowrap';
+        const up = document.createElement('button');
+        up.className = 'btn btn-ghost btn-sm px-2';
+        up.textContent = '↑';
+        up.disabled = i === 0;
+        up.onclick = () => move(i, -1);
+        const down = document.createElement('button');
+        down.className = 'btn btn-ghost btn-sm px-2';
+        down.textContent = '↓';
+        down.disabled = i === memberIds.length - 1;
+        down.onclick = () => move(i, 1);
+        const rm = document.createElement('button');
+        rm.className = 'btn btn-danger btn-sm px-2';
+        rm.textContent = '✕';
+        rm.onclick = () => {
+          memberIds.splice(i, 1);
+          renderMembership();
+        };
+        ctrl.append(up, down, rm);
+        li.append(label, ctrl);
+        list.appendChild(li);
+      });
+    }
+
+    function move(i: number, dir: number) {
+      const j = i + dir;
+      if (j < 0 || j >= memberIds.length) return;
+      const tmp = memberIds[i];
+      memberIds[i] = memberIds[j];
+      memberIds[j] = tmp;
+      renderMembership();
+    }
+
+    ($('btn-add-q') as HTMLButtonElement).onclick = () => {
+      const v = ($('mem-select') as HTMLSelectElement).value;
+      if (!v) return;
+      const id = Number(v);
+      if (!memberIds.includes(id)) memberIds.push(id);
+      renderMembership();
+    };
+
+    async function saveQuestions() {
+      const id = ($('f-id') as HTMLInputElement).value;
+      if (!id) return;
+      try {
+        await api(API + '/' + id + '/questions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ questionIds: memberIds }),
         });
+        flash(t(locale, 'admin.templates.msg.order_saved'));
+      } catch (e: any) {
+        flash(e.message, false);
       }
+    }
+    ($('btn-save-questions') as HTMLButtonElement).onclick = saveQuestions;
 
-      // Serialize a config section into an object. Empty text/number/select fields are
-      // OMITTED entirely (not stored as ''). Checkboxes always serialize as booleans.
-      // Returns null when nothing was set, so we don't persist an empty {} blob.
-      function collectFields(container) {
-        const out = {};
-        container.querySelectorAll('[data-key]').forEach((el) => {
-          const key = el.dataset.key;
-          const type = el.dataset.type;
-          if (type === 'checkbox') {
-            out[key] = el.checked;
-          } else if (type === 'number') {
-            const v = el.value.trim();
-            if (v !== '') {
-              const n = Number(v);
-              if (!Number.isNaN(n)) out[key] = n;
-            }
-          } else {
-            const v = el.value.trim();
-            if (v !== '') out[key] = v;
-          }
-        });
-        return Object.keys(out).length ? out : null;
-      }
+    // ── Open / edit ──────────────────────────────────────────────────────────────
+    function openNew() {
+      clearFlash();
+      $('editor-title').textContent = t(locale, 'admin.templates.editor.new');
+      ($('f-id') as HTMLInputElement).value = '';
+      ($('f-name') as HTMLInputElement).value = '';
+      ($('f-description') as HTMLTextAreaElement).value = '';
+      ($('f-enabled') as HTMLInputElement).checked = false;
+      buildFields($('heygen-fields'), HEYGEN_FIELDS);
+      buildFields($('tavus-fields'), TAVUS_FIELDS);
+      fillFields($('heygen-fields'), null);
+      fillFields($('tavus-fields'), null);
+      // Membership editing needs a saved template id.
+      memberIds = [];
+      $('mem-area').hidden = true;
+      $('mem-hint').hidden = false;
+      $('editor').hidden = false;
+      ($('f-name') as HTMLInputElement).focus();
+    }
 
-      // ── List ────────────────────────────────────────────────────────────────────
-      async function loadList() {
-        const rows = $('rows');
-        try {
-          const list = await api(API);
-          if (!list.length) {
-            rows.innerHTML = '<tr><td colspan="3" class="muted">No templates yet.</td></tr>';
-            return;
-          }
-          rows.innerHTML = '';
-          for (const t of list) {
-            const on = t.enabled === 1 || t.enabled === true;
-            const tr = document.createElement('tr');
-            const name = document.createElement('td');
-            name.className = 'name';
-            name.textContent = t.name;
-            const st = document.createElement('td');
-            const badge = document.createElement('span');
-            badge.className = 'badge ' + (on ? 'on' : 'off');
-            badge.textContent = on ? 'enabled' : 'disabled';
-            st.appendChild(badge);
-            const act = document.createElement('td');
-            act.className = 'action';
-            const edit = document.createElement('button');
-            edit.className = 'btn small';
-            edit.textContent = 'Edit';
-            edit.onclick = () => openEdit(t.id);
-            const del = document.createElement('button');
-            del.className = 'btn small danger';
-            del.textContent = 'Delete';
-            del.onclick = () => remove(t.id, t.name);
-            act.append(edit, del);
-            tr.append(name, st, act);
-            rows.appendChild(tr);
-          }
-        } catch (e) {
-          rows.innerHTML = '<tr><td colspan="3" class="err">' + e.message + '</td></tr>';
-        }
-      }
+    async function openEdit(id: number) {
+      clearFlash();
+      try {
+        const tpl = await api(API + '/' + id);
+        $('editor-title').textContent = t(locale, 'admin.templates.editor.edit', { id: tpl.id });
+        ($('f-id') as HTMLInputElement).value = String(tpl.id);
+        ($('f-name') as HTMLInputElement).value = tpl.name || '';
+        ($('f-description') as HTMLTextAreaElement).value = tpl.description || '';
+        ($('f-enabled') as HTMLInputElement).checked = tpl.enabled === 1 || tpl.enabled === true;
 
-      // ── Ordered membership editor ────────────────────────────────────────────────
-      // enabledQuestions: id -> { id, name } for all currently-enabled questions.
-      // memberIds: ordered array of selected question ids (the working state).
-      let enabledQuestions = new Map();
-      let memberIds = [];
+        buildFields($('heygen-fields'), HEYGEN_FIELDS);
+        buildFields($('tavus-fields'), TAVUS_FIELDS);
+        fillFields($('heygen-fields'), tpl.heygen_config);
+        fillFields($('tavus-fields'), tpl.tavus_config);
 
-      async function loadEnabledQuestions() {
-        const list = await api(QAPI);
-        enabledQuestions = new Map();
-        for (const q of list) {
-          if (q.enabled === 1 || q.enabled === true) {
+        await loadEnabledQuestions();
+        const members = await api(API + '/' + id + '/questions');
+        memberIds = members.map((q: any) => q.id);
+        // Membered questions may not be in the enabled set — keep them addressable.
+        for (const q of members) {
+          if (!enabledQuestions.has(q.id)) {
             enabledQuestions.set(q.id, { id: q.id, name: q.name });
           }
         }
-      }
-
-      function renderMembership() {
-        // The add-select shows only enabled questions not already in the list.
-        const sel = $('mem-select');
-        sel.innerHTML = '';
-        const available = [...enabledQuestions.values()].filter((q) => !memberIds.includes(q.id));
-        if (!available.length) {
-          const o = document.createElement('option');
-          o.value = '';
-          o.textContent = 'No more enabled questions';
-          sel.appendChild(o);
-          $('btn-add-q').disabled = true;
-        } else {
-          $('btn-add-q').disabled = false;
-          for (const q of available) {
-            const o = document.createElement('option');
-            o.value = q.id;
-            o.textContent = q.name;
-            sel.appendChild(o);
-          }
-        }
-
-        const list = $('mem-list');
-        list.innerHTML = '';
-        if (!memberIds.length) {
-          const li = document.createElement('li');
-          li.className = 'muted';
-          li.textContent = 'No questions selected.';
-          li.style.listStyle = 'none';
-          list.appendChild(li);
-          return;
-        }
-        memberIds.forEach((id, i) => {
-          const meta = enabledQuestions.get(id);
-          const li = document.createElement('li');
-          const label = document.createElement('span');
-          label.className = 'mem-name';
-          // A member id may no longer be enabled (e.g. disabled after selection) — flag it.
-          label.textContent = meta ? meta.name : '(question #' + id + ' — not enabled)';
-          if (!meta) label.classList.add('err');
-          const ctrl = document.createElement('span');
-          ctrl.className = 'mem-ctrl';
-          const up = document.createElement('button');
-          up.className = 'btn tiny';
-          up.textContent = '↑';
-          up.disabled = i === 0;
-          up.onclick = () => { move(i, -1); };
-          const down = document.createElement('button');
-          down.className = 'btn tiny';
-          down.textContent = '↓';
-          down.disabled = i === memberIds.length - 1;
-          down.onclick = () => { move(i, 1); };
-          const rm = document.createElement('button');
-          rm.className = 'btn tiny danger';
-          rm.textContent = '✕';
-          rm.onclick = () => { memberIds.splice(i, 1); renderMembership(); };
-          ctrl.append(up, down, rm);
-          li.append(label, ctrl);
-          list.appendChild(li);
-        });
-      }
-
-      function move(i, dir) {
-        const j = i + dir;
-        if (j < 0 || j >= memberIds.length) return;
-        const tmp = memberIds[i];
-        memberIds[i] = memberIds[j];
-        memberIds[j] = tmp;
         renderMembership();
-      }
+        $('mem-area').hidden = false;
+        $('mem-hint').hidden = true;
 
-      $('btn-add-q').onclick = () => {
-        const v = $('mem-select').value;
-        if (!v) return;
-        const id = Number(v);
-        if (!memberIds.includes(id)) memberIds.push(id);
-        renderMembership();
+        $('editor').hidden = false;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
+    async function saveTemplate() {
+      const id = ($('f-id') as HTMLInputElement).value;
+      const name = ($('f-name') as HTMLInputElement).value.trim();
+      if (!name) {
+        flash(t(locale, 'admin.templates.field.name') + ' *', false);
+        return;
+      }
+      const payload = {
+        name,
+        description: ($('f-description') as HTMLTextAreaElement).value.trim() || null,
+        enabled: ($('f-enabled') as HTMLInputElement).checked,
+        heygenConfig: collectFields($('heygen-fields')),
+        tavusConfig: collectFields($('tavus-fields')),
       };
-
-      async function saveQuestions() {
-        const id = $('f-id').value;
-        if (!id) return;
-        try {
-          await api(API + '/' + id + '/questions', {
+      try {
+        if (id) {
+          await api(API + '/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ questionIds: memberIds }),
+            body: JSON.stringify(payload),
           });
-          flash('Question order saved.');
-        } catch (e) {
-          flash(e.message, false);
-        }
-      }
-      $('btn-save-questions').onclick = saveQuestions;
-
-      // ── Open / edit ──────────────────────────────────────────────────────────────
-      async function openNew() {
-        clearFlash();
-        $('editor-title').textContent = 'New template';
-        $('f-id').value = '';
-        $('f-name').value = '';
-        $('f-description').value = '';
-        $('f-enabled').checked = false;
-        buildFields($('heygen-fields'), HEYGEN_FIELDS);
-        buildFields($('tavus-fields'), TAVUS_FIELDS);
-        fillFields($('heygen-fields'), null);
-        fillFields($('tavus-fields'), null);
-        // Membership editing needs a saved template id.
-        memberIds = [];
-        $('mem-area').hidden = true;
-        $('mem-hint').hidden = false;
-        $('editor').hidden = false;
-        $('f-name').focus();
-      }
-
-      async function openEdit(id) {
-        clearFlash();
-        try {
-          const t = await api(API + '/' + id);
-          $('editor-title').textContent = 'Edit template #' + t.id;
-          $('f-id').value = t.id;
-          $('f-name').value = t.name || '';
-          $('f-description').value = t.description || '';
-          $('f-enabled').checked = (t.enabled === 1 || t.enabled === true);
-
-          buildFields($('heygen-fields'), HEYGEN_FIELDS);
-          buildFields($('tavus-fields'), TAVUS_FIELDS);
-          fillFields($('heygen-fields'), t.heygen_config);
-          fillFields($('tavus-fields'), t.tavus_config);
-
-          await loadEnabledQuestions();
-          const members = await api(API + '/' + id + '/questions');
-          memberIds = members.map((q) => q.id);
-          // Membered questions may not be in the enabled set — keep them addressable.
-          for (const q of members) {
-            if (!enabledQuestions.has(q.id)) {
-              enabledQuestions.set(q.id, { id: q.id, name: q.name });
-            }
-          }
-          renderMembership();
-          $('mem-area').hidden = false;
-          $('mem-hint').hidden = true;
-
-          $('editor').hidden = false;
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        } catch (e) {
-          flash(e.message, false);
-        }
-      }
-
-      async function saveTemplate() {
-        const id = $('f-id').value;
-        const name = $('f-name').value.trim();
-        if (!name) { flash('Name is required.', false); return; }
-        const payload = {
-          name,
-          description: $('f-description').value.trim() || null,
-          enabled: $('f-enabled').checked,
-          heygenConfig: collectFields($('heygen-fields')),
-          tavusConfig: collectFields($('tavus-fields')),
-        };
-        try {
-          if (id) {
-            await api(API + '/' + id, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            flash('Template saved. (Use "Save question order" to persist membership.)');
-            loadList();
-          } else {
-            const created = await api(API, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-            flash('Template created. Reopen it to manage its questions.');
-            loadList();
-            // Reopen in edit mode so the operator can now manage membership.
-            if (created && created.id) openEdit(created.id);
-          }
-        } catch (e) {
-          flash(e.message, false);
-        }
-      }
-      $('btn-save').onclick = saveTemplate;
-
-      async function remove(id, name) {
-        if (!confirm('Delete template "' + name + '"?')) return;
-        try {
-          await api(API + '/' + id, { method: 'DELETE' });
-          flash('Deleted.');
-          $('editor').hidden = true;
+          flash(t(locale, 'admin.templates.msg.saved'));
           loadList();
-        } catch (e) {
-          flash(e.message, false);
+        } else {
+          const created = await api(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          flash(t(locale, 'admin.templates.msg.created'));
+          loadList();
+          // Reopen in edit mode so the operator can now manage membership.
+          if (created && created.id) openEdit(created.id);
         }
+      } catch (e: any) {
+        flash(e.message, false);
       }
+    }
+    ($('btn-save') as HTMLButtonElement).onclick = saveTemplate;
 
-      $('btn-new').onclick = openNew;
-      $('btn-cancel').onclick = () => { $('editor').hidden = true; clearFlash(); };
+    async function remove(id: number, name: string) {
+      if (!confirm(t(locale, 'admin.templates.confirm_delete', { name }))) return;
+      try {
+        await api(API + '/' + id, { method: 'DELETE' });
+        flash(t(locale, 'admin.templates.msg.deleted'));
+        $('editor').hidden = true;
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
 
-      loadList();
-    </script>
+    ($('btn-new') as HTMLButtonElement).onclick = openNew;
+    ($('btn-cancel') as HTMLButtonElement).onclick = () => {
+      $('editor').hidden = true;
+      clearFlash();
+    };
 
-    <style>
-      :global(body) {
-        margin: 0;
-        background: #0b0c10;
-        color: #e8eaed;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      }
-      main { max-width: 1000px; margin: 0 auto; padding: 32px 20px 80px; }
-      header { display: flex; align-items: baseline; gap: 20px; margin-bottom: 20px; }
-      h1 { margin: 0; font-size: 1.5rem; }
-      h2 { font-size: 1.1rem; margin: 0; }
-      .back { color: #6b7280; font-size: 0.85rem; text-decoration: none; }
-      .back:hover { color: #9aa0aa; }
-
-      .status { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; font-size: 0.9rem; }
-      .status.ok { background: #052e22; color: #a7f3d0; border: 1px solid #10b981; }
-      .status.err { background: #2e0808; color: #fca5a5; border: 1px solid #ef4444; }
-
-      .list-head {
-        display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
-      }
-      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-      thead th {
-        text-align: left; padding: 8px 12px; color: #6b7280; font-weight: 600;
-        font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
-        border-bottom: 1px solid #2a2c36;
-      }
-      tbody tr { border-bottom: 1px solid #1c1e27; }
-      tbody tr:hover { background: #12131a; }
-      td { padding: 10px 12px; vertical-align: middle; }
-      .name { font-weight: 600; }
-      .muted { color: #4b5563; }
-      .err { color: #fca5a5; }
-      .action { text-align: right; white-space: nowrap; }
-      .action .btn { margin-left: 6px; }
-
-      .badge {
-        padding: 2px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 0.04em;
-      }
-      .badge.on { background: #10b981; color: #04150f; }
-      .badge.off { background: #374151; color: #cbd5e1; }
-
-      .editor {
-        margin-top: 32px; padding: 8px 20px 20px; border: 1px solid #2a2c36;
-        border-radius: 12px; background: #12131a;
-      }
-      .editor > h2 { margin: 16px 0 4px; }
-      fieldset {
-        border: 1px solid #2a2c36; border-radius: 10px; margin: 16px 0; padding: 14px 16px;
-      }
-      legend { padding: 0 8px; font-size: 0.8rem; font-weight: 700; color: #a7f3d0;
-        text-transform: uppercase; letter-spacing: 0.04em; }
-      label {
-        display: flex; flex-direction: column; gap: 6px;
-        font-size: 0.85rem; color: #cbd5e1; margin-bottom: 12px;
-      }
-      label.inline { flex-direction: row; align-items: center; gap: 8px; }
-      .req { color: #f87171; }
-      .hint { color: #6b7280; font-size: 0.8rem; margin: 0 0 12px; }
-      input[type='text'], input[type='number'], textarea, select {
-        padding: 8px 10px; font-size: 0.9rem; color: #e8eaed;
-        background: #17181f; border: 1px solid #2a2c36; border-radius: 8px; font-family: inherit;
-      }
-      textarea { resize: vertical; }
-
-      .grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;
-      }
-      .field { margin-bottom: 0; }
-      .field-label { font-size: 0.82rem; color: #cbd5e1; }
-      .field-hint { color: #6b7280; font-style: normal; font-size: 0.72rem; }
-      .field-checkbox.inline { align-items: center; }
-
-      .mem-add { display: flex; gap: 8px; margin-bottom: 12px; }
-      .mem-add select { flex: 1; }
-      .mem-list { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
-      .mem-list li {
-        display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        padding: 4px 0;
-      }
-      .mem-name { font-size: 0.9rem; }
-      .mem-ctrl { display: flex; gap: 4px; white-space: nowrap; }
-
-      .actions { display: flex; gap: 10px; margin-top: 8px; }
-
-      .btn {
-        padding: 8px 16px; font-size: 0.9rem; font-weight: 600; color: #e8eaed;
-        background: #24262f; border: 1px solid #2a2c36; border-radius: 8px;
-        cursor: pointer; transition: filter 0.15s;
-      }
-      .btn:hover { filter: brightness(1.15); }
-      .btn:disabled { opacity: 0.4; cursor: default; }
-      .btn.primary { color: #04150f; background: #10b981; border-color: transparent; }
-      .btn.small { padding: 4px 12px; font-size: 0.8rem; }
-      .btn.tiny { padding: 2px 8px; font-size: 0.8rem; }
-      .btn.danger { color: #fca5a5; border-color: #7f1d1d; }
-      .btn.danger:hover { background: #2e0808; }
-    </style>
-  </body>
-</html>
+    loadList();
+  </script>
+</AdminLayout>
