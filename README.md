@@ -126,6 +126,16 @@ npm run dev
 Open **http://localhost:4321**. Mic + WebRTC work on `http://localhost` (a secure
 context), so no HTTPS setup is needed.
 
+## Access gate
+
+The whole app sits behind a single shared password (middleware + a signed, httpOnly
+session cookie). The default password is **`12345Abc$`**; override it by setting
+`GATE_PASSWORD` in `.env` (and optionally `GATE_SESSION_SECRET` to sign cookies — when
+empty it derives from the password, so rotating the password logs everyone out). The var
+is prefixed `GATE_*` to avoid clashing with a generic `APP_PASSWORD` in your shell.
+
+The admin (`/admin`) manages prompts, questions, and templates behind this gate.
+
 ## Cost meter (HeyGen vs Tavus)
 
 A floating meter estimates **≈ $ this session** to compare providers:

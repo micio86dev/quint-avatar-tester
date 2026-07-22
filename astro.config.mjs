@@ -39,11 +39,12 @@ export default defineConfig({
       // Per-question timer (seconds). Defaults in timing.ts (285 = 4:45, warn at 60).
       SESSION_TIME_LIMIT_SECONDS: envField.string({ context: 'server', access: 'secret', optional: true, default: '' }),
       SESSION_WARN_SECONDS: envField.string({ context: 'server', access: 'secret', optional: true, default: '' }),
-      // App access gate. APP_PASSWORD unlocks the whole app; override it in .env to rotate.
-      // APP_SESSION_SECRET signs the session cookie; when empty it derives from APP_PASSWORD
-      // (so changing the password invalidates existing sessions).
-      APP_PASSWORD: envField.string({ context: 'server', access: 'secret', optional: true, default: '' }),
-      APP_SESSION_SECRET: envField.string({ context: 'server', access: 'secret', optional: true, default: '' }),
+      // App access gate. GATE_PASSWORD unlocks the whole app; override it in .env to rotate.
+      // GATE_SESSION_SECRET signs the session cookie; when empty it derives from GATE_PASSWORD
+      // (so changing the password invalidates existing sessions). Prefixed to avoid clashing
+      // with a generic APP_PASSWORD that may already exist in the shell environment.
+      GATE_PASSWORD: envField.string({ context: 'server', access: 'secret', optional: true, default: '' }),
+      GATE_SESSION_SECRET: envField.string({ context: 'server', access: 'secret', optional: true, default: '' }),
     },
   },
 });
