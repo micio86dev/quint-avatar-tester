@@ -401,8 +401,8 @@ export function getNextQuestionIndex(candidateId: number): number | null {
 }
 
 // ── Prompts (avatar-prompt catalog) ──────────────────────────────────────────────
-// One row = one editable system prompt / interview script. Provider config blobs are
-// stored as JSON strings; the CRUD layer accepts objects and serializes them on write.
+// One row = one editable system prompt / interview script (persona only). Provider
+// config blobs live on the template now, not here (see 0004_configs_to_templates.sql).
 export interface PromptRow {
   id: number;
   title: string;
@@ -410,8 +410,6 @@ export interface PromptRow {
   greeting: string | null;
   language: string;
   notes: string | null;
-  heygen_config: string | null; // JSON string, see 0002_prompts.sql for the shape
-  tavus_config: string | null; // JSON string, see 0002_prompts.sql for the shape
   created_at: string;
   updated_at: string;
 }
@@ -422,9 +420,6 @@ export interface PromptInput {
   greeting?: string | null;
   language?: string;
   notes?: string | null;
-  // Accept objects (serialized to JSON on write) or a pre-stringified/null value.
-  heygenConfig?: Record<string, unknown> | string | null;
-  tavusConfig?: Record<string, unknown> | string | null;
 }
 
 // Normalize a config input to the stored representation: null when absent, otherwise a
@@ -452,8 +447,8 @@ export function createPrompt(input: PromptInput): number {
   const info = getDb()
     .prepare(
       `INSERT INTO prompts
-         (title, body, greeting, language, notes, heygen_config, tavus_config, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (title, body, greeting, language, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -461,8 +456,6 @@ export function createPrompt(input: PromptInput): number {
       input.greeting ?? null,
       input.language ?? 'it',
       input.notes ?? null,
-      serializeConfig(input.heygenConfig),
-      serializeConfig(input.tavusConfig),
       now,
       now,
     );
@@ -475,7 +468,7 @@ export function updatePrompt(id: number, input: PromptInput): void {
     .prepare(
       `UPDATE prompts
          SET title = ?, body = ?, greeting = ?, language = ?, notes = ?,
-             heygen_config = ?, tavus_config = ?, updated_at = ?
+             updated_at = ?
        WHERE id = ?`,
     )
     .run(
@@ -484,8 +477,6 @@ export function updatePrompt(id: number, input: PromptInput): void {
       input.greeting ?? null,
       input.language ?? 'it',
       input.notes ?? null,
-      serializeConfig(input.heygenConfig),
-      serializeConfig(input.tavusConfig),
       now,
       id,
     );
@@ -585,12 +576,17 @@ export function deleteQuestion(id: number): void {
   getDb().prepare(`DELETE FROM questions WHERE id = ?`).run(id);
 }
 
-// ── Templates (ordered question selections) ───────────────────────────────────────
+// ── Templates (ordered question selections + provider config) ─────────────────────
+// The template is the full experiment recipe: ordered questions plus the provider
+// config blobs (moved here from prompts in 0004_configs_to_templates.sql). Config
+// blobs are stored as JSON strings; the CRUD layer accepts objects and serializes them.
 export interface TemplateRow {
   id: number;
   name: string;
   description: string | null;
   enabled: number; // 0/1 boolean
+  heygen_config: string | null; // JSON string, see 0002_prompts.sql for the shape
+  tavus_config: string | null; // JSON string, see 0002_prompts.sql for the shape
   created_at: string;
   updated_at: string;
 }
@@ -599,6 +595,9 @@ export interface TemplateInput {
   name: string;
   description?: string | null;
   enabled?: boolean;
+  // Accept objects (serialized to JSON on write) or a pre-stringified/null value.
+  heygenConfig?: Record<string, unknown> | string | null;
+  tavusConfig?: Record<string, unknown> | string | null;
 }
 
 // Junction row between a template and a question, carrying the run order.
@@ -627,10 +626,19 @@ export function createTemplate(input: TemplateInput): number {
   const now = new Date().toISOString();
   const info = getDb()
     .prepare(
-      `INSERT INTO templates (name, description, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO templates
+         (name, description, enabled, heygen_config, tavus_config, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(input.name, input.description ?? null, input.enabled === false ? 0 : 1, now, now);
+    .run(
+      input.name,
+      input.description ?? null,
+      input.enabled === false ? 0 : 1,
+      serializeConfig(input.heygenConfig),
+      serializeConfig(input.tavusConfig),
+      now,
+      now,
+    );
   return Number(info.lastInsertRowid);
 }
 
@@ -639,10 +647,19 @@ export function updateTemplate(id: number, input: TemplateInput): void {
   getDb()
     .prepare(
       `UPDATE templates
-         SET name = ?, description = ?, enabled = ?, updated_at = ?
+         SET name = ?, description = ?, enabled = ?,
+             heygen_config = ?, tavus_config = ?, updated_at = ?
        WHERE id = ?`,
     )
-    .run(input.name, input.description ?? null, input.enabled === false ? 0 : 1, now, id);
+    .run(
+      input.name,
+      input.description ?? null,
+      input.enabled === false ? 0 : 1,
+      serializeConfig(input.heygenConfig),
+      serializeConfig(input.tavusConfig),
+      now,
+      id,
+    );
 }
 
 export function setTemplateEnabled(id: number, enabled: boolean): void {

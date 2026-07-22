@@ -77,9 +77,6 @@ export function seed(conn?: Database.Database): SeedResult {
     body: composeBody(q),
     greeting: q.intro,
     language: q.language,
-    // Provider config is left null — the operator fills it in later via the CRUD.
-    heygenConfig: null,
-    tavusConfig: null,
   });
 
   // 2. One question row per entry, preserving order for the template membership.
@@ -92,7 +89,8 @@ export function seed(conn?: Database.Database): SeedResult {
     }),
   );
 
-  // 3. Default template that runs those questions in file order.
+  // 3. Default template that runs those questions in file order. Provider config is
+  // left null (omitted) — the operator fills it in later via the CRUD.
   const templateId = createTemplate({
     name: q.title,
     description: null,

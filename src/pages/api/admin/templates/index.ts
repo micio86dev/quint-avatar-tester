@@ -1,10 +1,22 @@
 import type { APIRoute } from 'astro';
 import { createTemplate, listTemplates, type TemplateInput } from '../../../../lib/db';
-import { guard, json, readJson } from '../_helpers';
+import { guard, json, parseStoredConfig, readConfigInput, readJson } from '../_helpers';
 
 export const prerender = false;
 
-export const GET: APIRoute = async () => guard(async () => json(200, listTemplates()));
+// Shape a stored template row for API responses: parse the config JSON strings back into
+// structured objects (or null) so clients receive typed data, not raw JSON strings.
+function serializeTemplate(row: ReturnType<typeof listTemplates>[number]) {
+  const { heygen_config, tavus_config, ...rest } = row;
+  return {
+    ...rest,
+    heygen_config: parseStoredConfig(heygen_config),
+    tavus_config: parseStoredConfig(tavus_config),
+  };
+}
+
+export const GET: APIRoute = async () =>
+  guard(async () => json(200, listTemplates().map(serializeTemplate)));
 
 export const POST: APIRoute = async ({ request }) =>
   guard(async () => {
@@ -19,6 +31,8 @@ export const POST: APIRoute = async ({ request }) =>
     const input: TemplateInput = {
       name,
       description: typeof body.description === 'string' ? body.description : null,
+      heygenConfig: readConfigInput(body.heygenConfig),
+      tavusConfig: readConfigInput(body.tavusConfig),
     };
     if (typeof body.enabled === 'boolean') input.enabled = body.enabled;
 

@@ -1,24 +1,8 @@
 import type { APIRoute } from 'astro';
 import { deletePrompt, getPrompt, updatePrompt, type PromptInput } from '../../../../lib/db';
-import {
-  guard,
-  json,
-  parseId,
-  parseStoredConfig,
-  readConfigInput,
-  readJson,
-} from '../_helpers';
+import { guard, json, parseId, readJson } from '../_helpers';
 
 export const prerender = false;
-
-function serializePrompt(row: NonNullable<ReturnType<typeof getPrompt>>) {
-  const { heygen_config, tavus_config, ...rest } = row;
-  return {
-    ...rest,
-    heygen_config: parseStoredConfig(heygen_config),
-    tavus_config: parseStoredConfig(tavus_config),
-  };
-}
 
 export const GET: APIRoute = async ({ params }) =>
   guard(async () => {
@@ -26,7 +10,7 @@ export const GET: APIRoute = async ({ params }) =>
     if (id === null) return json(400, { error: 'Invalid id.' });
     const row = getPrompt(id);
     if (!row) return json(404, { error: 'Prompt not found.' });
-    return json(200, serializePrompt(row));
+    return json(200, row);
   });
 
 export const PUT: APIRoute = async ({ params, request }) =>
@@ -49,14 +33,12 @@ export const PUT: APIRoute = async ({ params, request }) =>
       body: text,
       greeting: typeof body.greeting === 'string' ? body.greeting : null,
       notes: typeof body.notes === 'string' ? body.notes : null,
-      heygenConfig: readConfigInput(body.heygenConfig),
-      tavusConfig: readConfigInput(body.tavusConfig),
     };
     if (typeof body.language === 'string' && body.language) input.language = body.language;
 
     updatePrompt(id, input);
     const row = getPrompt(id)!;
-    return json(200, serializePrompt(row));
+    return json(200, row);
   });
 
 export const DELETE: APIRoute = async ({ params }) =>
