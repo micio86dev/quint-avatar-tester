@@ -1,52 +1,40 @@
-// Loads the interview script (questions.json at the repo root) and composes the Italian
-// interviewer context injected into each provider's own LLM. The interview runs as a
-// SEQUENCE of single-question sessions, so we compose ONE question at a time (with a
-// recap of prior answers for continuity) rather than the whole list.
+// Composes the Italian interviewer context injected into a provider's own LLM. The
+// interview runs as ONE continuous conversation covering all of a template's questions in
+// order — the avatar asks them one at a time, without stopping between them, and signals
+// completion once (after the LAST question) via the provider-specific mechanism.
 // Only the avatar's spoken content and the questions are Italian; everything else
 // (code, identifiers, comments) stays English.
-import raw from '../../questions.json';
+import { HEYGEN_END_PHRASE } from '../providers/types';
 
-export interface Question {
-  id: string;
+// One question to cover in the interview, in run order.
+export interface InterviewQuestion {
+  name: string;
   text: string;
-  objective: string;
-  // Optional behavioral-competency fields (questions.json v2+). When present, the prompt
-  // injects the internal evaluation criteria and drives the shared fixed follow-up strategy;
-  // when absent, composeQuestionPrompt falls back to the generic targeted-follow-up behavior.
-  name?: string;
-  evaluationCriteria?: string[];
+  objective: string | null;
 }
 
-export interface Questions {
-  language: string;
-  version: string;
-  title: string;
-  totalQuestions: number;
-  intro: string;
-  resumeGreeting: string;
-  closing: string;
-  instructions: string;
-  // Shared across every competency (behavioral mode): the coverage the avatar checks for
-  // and the standardized follow-up questions it must ask VERBATIM when a topic is missing.
-  coverageTopics?: string[];
-  followUpQuestions?: string[];
-  questions: Question[];
+export interface InterviewPromptParams {
+  promptBody: string; // the persona / interviewing instructions (from the prompt row)
+  greeting: string; // spoken opening line, verbatim (no baked-in question)
+  questions: InterviewQuestion[];
+  provider: 'heygen' | 'tavus';
+  maxSeconds: number; // resolved session cap, surfaced to keep the avatar on pace
 }
 
-export const questions = raw as Questions;
+// Tavus-only: at the very end of the WHOLE interview the persona calls the end_interview
+// tool (registered once on the PAL). It reaches the client as a conversation.tool_call
+// app-message and drives the soft auto-advance. HeyGen has no equivalent hook.
+const TAVUS_END_TOOL_INSTRUCTION =
+  '\n\nQuando hai coperto l’ULTIMA domanda dell’intervista, dopo la tua breve frase ' +
+  'di conclusione chiama SUBITO lo strumento end_interview per segnalare che hai finito. ' +
+  'Non annunciarlo: chiamalo in silenzio. Chiamalo una sola volta, solo alla fine.';
 
-// One already-answered prior question, condensed for the recap.
-export interface PriorAnswer {
-  label: string; // the prior question's text, for context
-  text: string; // the (raw-derived) answer summary
-}
-
-export interface QuestionPromptParams {
-  index: number; // 0-based index of the current question
-  isFirst: boolean; // first question of the whole interview? → intro vs resume greeting
-  priorAnswers: PriorAnswer[];
-  timeLimitSeconds: number;
-}
+// HeyGen FULL mode has no tool-calling, so completion is signalled by SPEAKING a fixed
+// phrase ONCE, only after the last question is covered. The client (heygen.ts
+// matchesEndPhrase) detects it and drives the auto-advance.
+const HEYGEN_END_PHRASE_INSTRUCTION =
+  '\n\nQuando hai coperto l’ULTIMA domanda dell’intervista, dopo la tua breve frase ' +
+  `di conclusione pronuncia ESATTAMENTE, parola per parola, questa frase finale e poi fermati: "${HEYGEN_END_PHRASE}"`;
 
 function mmss(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -55,78 +43,55 @@ function mmss(totalSeconds: number): string {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
-// Compose the Italian context for a SINGLE question session. Only the current question
-// is ever in scope; prior answers are summarized so the avatar keeps continuity without
-// re-asking. Returns the system prompt (injected as the provider context) and the spoken
-// greeting (opening line).
-export function composeQuestionPrompt(params: QuestionPromptParams): {
+// Build a short timezone context preamble to prepend to the persona system prompt so the
+// avatar knows the candidate's local date and time without guessing. Returns '' when no
+// timezone is known or the timezone is invalid.
+export function timezoneContext(tz: string | null): string {
+  if (!tz) return '';
+  try {
+    const localTime = new Date().toLocaleString('it-IT', {
+      timeZone: tz,
+      dateStyle: 'full',
+      timeStyle: 'short',
+    });
+    return `[Contesto temporale]\nFuso orario del candidato: ${tz}. Ora locale: ${localTime}.\n\n`;
+  } catch {
+    return '';
+  }
+}
+
+// Compose the Italian context for ONE continuous interview covering every question in the
+// template, in order. Returns the system prompt (injected as the provider context) and the
+// spoken greeting (opening line, no baked-in question). The provider-specific completion
+// instruction is appended ONCE for the whole interview.
+export function composeInterviewPrompt(params: InterviewPromptParams): {
   systemPrompt: string;
   greeting: string;
 } {
-  const { index, isFirst, priorAnswers, timeLimitSeconds } = params;
-  const q = questions.questions[index];
-  if (!q) throw new Error(`No question at index ${index}.`);
+  const { promptBody, greeting, questions, provider, maxSeconds } = params;
 
-  // The opening line is spoken VERBATIM by the provider (Tavus custom_greeting /
-  // HeyGen opening_text), so we bake the actual question into it. This guarantees the
-  // avatar ASKS the question immediately instead of greeting and stalling for a
-  // readiness cue — the old greeting ended with "Iniziamo?" and the avatar waited.
-  const greetingBase = isFirst ? questions.intro : questions.resumeGreeting;
-  const greeting = `${greetingBase} ${q.text}`;
+  const lines: string[] = [promptBody, '', 'Domande dell’intervista (in questo ordine):'];
 
-  const lines: string[] = [questions.instructions, ''];
-
-  if (priorAnswers.length) {
-    lines.push("L'utente ha gia' fornito:");
-    for (const a of priorAnswers) lines.push(`- ${a.label}: ${a.text}`);
-    lines.push('Non richiedere di nuovo queste informazioni.', '');
-  }
-
-  lines.push(
-    `Hai gia' posto questa domanda nella frase di apertura: "${q.text}"`,
-    "NON ripetere la domanda e NON chiedere se l'utente e' pronto: attendi la sua risposta.",
-    `Obiettivo da raccogliere: ${q.objective}`,
-  );
-
-  // Behavioral-competency mode: the internal evaluation criteria are guidance for the
-  // avatar to judge coverage — never revealed to the participant, never a direct checklist.
-  if (q.evaluationCriteria?.length) {
-    lines.push(
-      'Criteri di valutazione (uso interno, NON rivelarli mai al partecipante e non trasformarli in domande dirette):',
-    );
-    for (const c of q.evaluationCriteria) lines.push(`- ${c}`);
-  }
-
-  // Fixed follow-up strategy (shared across competencies): ask the standardized questions
-  // VERBATIM, only for coverage still missing, one at a time. Falls back to generic
-  // targeted follow-ups when the script does not define a fixed set.
-  if (questions.followUpQuestions?.length) {
-    if (questions.coverageTopics?.length) {
-      lines.push(
-        '',
-        'Dopo la risposta iniziale, verifica internamente se sono gia\' emersi chiaramente questi elementi:',
-      );
-      for (const topic of questions.coverageTopics) lines.push(`- ${topic}`);
+  questions.forEach((q, i) => {
+    lines.push(`${i + 1}. ${q.text}`);
+    if (q.objective && q.objective.trim()) {
+      lines.push(`   Obiettivo: ${q.objective.trim()}`);
     }
-    lines.push(
-      '',
-      'Fai domande di approfondimento SOLO per gli elementi ancora mancanti, usando ESATTAMENTE questa formulazione (non parafrasare), una domanda alla volta:',
-    );
-    for (const f of questions.followUpQuestions) lines.push(`- "${f}"`);
-    lines.push(
-      "Non chiedere informazioni gia' fornite. Quando gli elementi essenziali sono coperti, chiudi con una breve frase di conclusione e fermati.",
-    );
-  } else {
-    lines.push(
-      "Fai follow-up mirati finche' non hai raccolto l'obiettivo. Massimo 2-3 follow-up. " +
-        'Poi chiudi con una breve frase di conclusione per questa domanda e fermati.',
-    );
-  }
+  });
 
   lines.push(
     '',
-    `Hai pochi minuti (${mmss(timeLimitSeconds)}), vai al punto e non divagare.`,
+    'Conduci queste domande in sequenza in UNA SOLA conversazione continua, una alla volta, ' +
+      'senza fermarti tra una e l’altra. Passa alla domanda successiva solo dopo aver ' +
+      'raccolto l’obiettivo di quella corrente. Non ripetere l’elenco delle domande e ' +
+      'non chiedere se il partecipante è pronto: attendi le sue risposte.',
+    '',
+    `Hai a disposizione circa ${mmss(maxSeconds)} in totale: gestisci il tempo, vai al punto e non divagare.`,
   );
 
-  return { systemPrompt: lines.join('\n'), greeting };
+  let systemPrompt = lines.join('\n');
+  systemPrompt +=
+    provider === 'heygen' ? HEYGEN_END_PHRASE_INSTRUCTION : TAVUS_END_TOOL_INSTRUCTION;
+
+  return { systemPrompt, greeting };
 }

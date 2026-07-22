@@ -65,9 +65,6 @@ function eventDetail(type: string, metaJson: string | null): string {
               <h1>Interview #{session.id}</h1>
               <p class="meta">
                 <span class="badge">{session.provider}</span>
-                {session.question_index != null && (
-                  <span>· Domanda {session.question_index + 1}</span>
-                )}
                 {session.ended_reason && <span>· {session.ended_reason}</span>}
                 <span>· started {session.started_at}</span>
                 {session.ended_at && <span>· ended {session.ended_at}</span>}

@@ -26,11 +26,16 @@ export const POST: APIRoute = async ({ request, cookies, url }) => {
     });
   }
 
+  // Behind Railway's proxy the internal protocol is http, so also honor the
+  // forwarded header to keep the cookie Secure in production.
+  const isHttps =
+    url.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
+
   cookies.set(SESSION_COOKIE, sessionToken(), {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    secure: url.protocol === 'https:',
+    secure: isHttps,
     maxAge: SESSION_MAX_AGE,
   });
 

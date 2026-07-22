@@ -53,6 +53,9 @@ export async function guard(fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
   } catch (err) {
-    return json(500, { error: err instanceof Error ? err.message : String(err) });
+    // Log the real error server-side; return a generic message so no exception
+    // detail (stack, internal paths) leaks to the client.
+    console.error('[admin api]', err);
+    return json(500, { error: 'Internal server error' });
   }
 }

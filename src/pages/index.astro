@@ -1,22 +1,26 @@
 ---
-// One-question-per-session Italian HR interview across two interchangeable providers
-// (HeyGen | Tavus). A candidate starts (or resumes with a code), answers one question per
-// short timed session, and can pause between questions. Every utterance is persisted to
-// local SQLite. The page is a small multi-screen state machine that never scrolls on Y.
+// Single continuous avatar interview across two interchangeable providers
+// (HeyGen | Tavus), driven by a prompt (persona) × template (questions + provider config).
+// The operator picks a prompt and a template, then runs ONE timed session end-to-end.
+// Every utterance is persisted to local SQLite. The page is a small three-screen state
+// machine (start → interview → done) that never scrolls on Y.
+//
+// This is an operator test tool: the UI copy is English; only the avatar's spoken
+// content stays Italian.
 ---
 
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Interview Demo — HeyGen / Tavus</title>
+    <title>Interview Tester — HeyGen / Tavus</title>
   </head>
   <body>
     <main class="app" id="app" data-screen="start">
       <!-- ── START ─────────────────────────────────────────────────────────── -->
       <section class="screen panel" id="screen-start">
-        <h1 class="brand">Colloquio conoscitivo</h1>
+        <h1 class="brand">Interview Tester</h1>
 
         <div class="provider-toggle" role="radiogroup" aria-label="Provider">
           <label>
@@ -29,63 +33,41 @@
           </label>
         </div>
 
+        <div class="selectors">
+          <label class="field">
+            <span class="field-label">Prompt (persona)</span>
+            <select id="prompt-select" class="select">
+              <option value="">Loading…</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Template (questions)</span>
+            <select id="template-select" class="select">
+              <option value="">Loading…</option>
+            </select>
+          </label>
+        </div>
+
         <label class="consent">
           <input type="checkbox" id="consent" />
           <span
-            >Questa è una demo. Parlerai con un intervistatore AI; la conversazione viene
-            trascritta e salvata localmente per analisi. Durante il colloquio la sessione è
-            monitorata per integrità: la webcam resta attiva e vengono registrati segnali di
-            presenza e attenzione (nessuna immagine lascia il tuo dispositivo). Procedendo,
-            acconsenti.</span
+            >This is a test session. You will speak with an AI interviewer; the
+            conversation is transcribed and stored locally for analysis. During the
+            interview the session is monitored for integrity: the webcam stays active and
+            presence/attention signals are recorded (no image leaves this device). By
+            continuing, you consent.</span
           >
         </label>
 
-        <div class="paths">
-          <div class="path">
-            <h2>Nuovo colloquio</h2>
-            <input type="text" id="display-name" placeholder="Il tuo nome" autocomplete="name" />
-            <button type="button" id="btn-new" class="btn primary">Inizia</button>
-          </div>
-          <div class="path-sep">oppure</div>
-          <div class="path">
-            <h2>Riprendi</h2>
-            <input type="text" id="resume-code" placeholder="Codice (es. 7QK2PM)" maxlength="8" />
-            <button type="button" id="btn-resume" class="btn">Riprendi</button>
-          </div>
-        </div>
+        <button type="button" id="btn-start" class="btn primary" disabled>Start interview</button>
 
         <p id="start-error" class="error-line"></p>
-        <a href="/admin" class="admin-link">Archivio interviste →</a>
-      </section>
-
-      <!-- ── CODE (shown once after a new candidate is created) ────────────────── -->
-      <section class="screen panel" id="screen-code">
-        <h2>Salva questo codice</h2>
-        <p class="hint">Ti servirà per riprendere il colloquio più tardi.</p>
-        <p class="code-big" id="code-value">——————</p>
-        <button type="button" id="btn-begin" class="btn primary">Inizia il colloquio</button>
-      </section>
-
-      <!-- ── RULES (pre-interview briefing — shown once before the first question) ── -->
-      <section class="screen panel" id="screen-rules">
-        <h2>Prima di iniziare</h2>
-        <p class="hint">Questo colloquio è monitorato per garantire l'equità. Assicurati di:</p>
-        <ul class="rules-list">
-          <li>Essere solo/a nell'inquadratura della webcam</li>
-          <li>Rimanere con il viso visibile e rivolto verso lo schermo</li>
-          <li>Non cambiare scheda o finestra durante il colloquio</li>
-          <li>Non copiare o incollare testo</li>
-          <li>Rimanere in modalità schermo intero</li>
-        </ul>
-        <p class="rules-note">La webcam rimane attiva e vengono acquisiti snapshot periodici. Nessun video lascia il tuo dispositivo.</p>
-        <button type="button" id="btn-rules-ok" class="btn primary">Ho capito, inizia il colloquio</button>
+        <a href="/admin" class="admin-link">Interview archive →</a>
       </section>
 
       <!-- ── INTERVIEW ─────────────────────────────────────────────────────────── -->
       <div class="screen interview" id="screen-interview">
         <header class="topbar">
-          <span class="progress" id="progress">Domanda 1 di 7</span>
-          <span class="completed" id="completed">✓ 0/7</span>
           <span class="timer" id="timer" data-warn="normal">—:——</span>
         </header>
 
@@ -108,9 +90,9 @@
         </section>
 
         <footer class="bar">
-          <p id="status" class="status" data-state="idle">pronta a iniziare</p>
+          <p id="status" class="status" data-state="idle">ready to start</p>
           <button id="talk-button" class="pulsantone" type="button" data-on="false">
-            🎤 Parla
+            ⏹ Stop
           </button>
         </footer>
         <div id="toast" class="toast" hidden>
@@ -118,29 +100,12 @@
         </div>
       </div>
 
-      <!-- ── END OF QUESTION ───────────────────────────────────────────────────── -->
-      <section class="screen panel" id="screen-endq">
-        <h2 id="endq-title">Domanda conclusa</h2>
-        <p class="hint" id="endq-hint">Vuoi continuare con la prossima domanda?</p>
-        <div class="row">
-          <button type="button" id="btn-next" class="btn primary">Prossima domanda</button>
-          <button type="button" id="btn-pause" class="btn">Metti in pausa</button>
-        </div>
-      </section>
-
-      <!-- ── PAUSED ────────────────────────────────────────────────────────────── -->
-      <section class="screen panel" id="screen-paused">
-        <h2>Colloquio in pausa</h2>
-        <p class="hint">Il tuo codice per riprendere più tardi:</p>
-        <p class="code-big" id="paused-code">——————</p>
-        <button type="button" id="btn-home" class="btn primary">Torna all'inizio</button>
-      </section>
-
       <!-- ── DONE ──────────────────────────────────────────────────────────────── -->
       <section class="screen panel" id="screen-done">
-        <h2>Colloquio completato 🎉</h2>
-        <p class="hint">Grazie per il tuo tempo! Le risposte sono salvate.</p>
-        <button type="button" id="btn-home-2" class="btn primary">Torna all'inizio</button>
+        <h2>Interview finished 🎉</h2>
+        <p class="hint">The transcript has been saved.</p>
+        <a id="transcript-link" class="btn primary" href="#">View transcript</a>
+        <button type="button" id="btn-restart" class="btn">Start another</button>
       </section>
     </main>
 
@@ -173,16 +138,12 @@
         height: 100dvh;
       }
       .app[data-screen='start'] #screen-start,
-      .app[data-screen='code'] #screen-code,
-      .app[data-screen='rules'] #screen-rules,
       .app[data-screen='interview'] #screen-interview,
-      .app[data-screen='endq'] #screen-endq,
-      .app[data-screen='paused'] #screen-paused,
       .app[data-screen='done'] #screen-done {
         display: flex;
       }
 
-      /* Centered panels (start / code / endq / paused / done). */
+      /* Centered panels (start / done). */
       .panel {
         flex-direction: column;
         align-items: center;
@@ -204,14 +165,6 @@
         color: #9aa0aa;
         font-size: 0.9rem;
       }
-      .code-big {
-        margin: 4px 0;
-        font-size: 2.4rem;
-        font-weight: 800;
-        letter-spacing: 0.18em;
-        color: #a7f3d0;
-        font-variant-numeric: tabular-nums;
-      }
       .error-line {
         margin: 0;
         min-height: 1.2em;
@@ -228,40 +181,33 @@
       }
       .admin-link:hover { color: #9aa0aa; }
 
-      /* Start-screen New / Resume paths. */
-      .paths {
+      /* Prompt / template selectors. */
+      .selectors {
         display: flex;
-        align-items: stretch;
         gap: 18px;
         margin-top: 4px;
       }
-      .path {
+      .field {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        min-width: 200px;
+        gap: 6px;
+        min-width: 220px;
+        text-align: left;
       }
-      .path h2 {
-        font-size: 1rem;
+      .field-label {
+        font-size: 0.8rem;
         color: #cbd5e1;
       }
-      .path-sep {
-        align-self: center;
-        color: #6b7280;
-        font-size: 0.8rem;
-      }
-      input[type='text'] {
+      .select {
         padding: 10px 12px;
-        font-size: 1rem;
+        font-size: 0.95rem;
         color: #e8eaed;
         background: #17181f;
         border: 1px solid #2a2c36;
         border-radius: 10px;
-        text-align: center;
       }
-      #resume-code {
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
+      .select:disabled {
+        opacity: 0.5;
       }
 
       .btn {
@@ -273,6 +219,7 @@
         border: 1px solid #2a2c36;
         border-radius: 999px;
         cursor: pointer;
+        text-decoration: none;
         transition: filter 0.15s ease;
       }
       .btn:hover {
@@ -287,10 +234,6 @@
         opacity: 0.5;
         cursor: default;
       }
-      .row {
-        display: flex;
-        gap: 12px;
-      }
 
       /* Interview screen: fixed top bar, stage fills, fixed bottom bar. */
       .interview {
@@ -300,19 +243,11 @@
         flex-shrink: 0;
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-end;
         gap: 12px;
         padding: 10px 18px calc(10px);
         padding-top: calc(10px + env(safe-area-inset-top, 0px));
         border-bottom: 1px solid #1b1d24;
-      }
-      .progress {
-        font-size: 0.95rem;
-        font-weight: 600;
-      }
-      .completed {
-        color: #9aa0aa;
-        font-size: 0.85rem;
       }
       .timer {
         font-size: 1.15rem;
@@ -464,29 +399,24 @@
       }
 
       .pulsantone {
-        --accent: #10b981;
+        --accent: #ef4444;
         min-width: 240px;
         padding: 16px 40px;
         font-size: 1.3rem;
         font-weight: 700;
-        color: #04150f;
+        color: #fff;
         background: var(--accent);
         border: none;
         border-radius: 999px;
         cursor: pointer;
         transition: transform 0.08s ease, filter 0.15s ease, background 0.15s ease;
-        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+        box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
       }
       .pulsantone:hover {
         filter: brightness(1.06);
       }
       .pulsantone:active {
         transform: translateY(1px);
-      }
-      .pulsantone[data-on='true'] {
-        --accent: #ef4444;
-        color: #fff;
-        box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
       }
       .pulsantone:disabled {
         opacity: 0.6;
@@ -538,24 +468,6 @@
         margin-top: 2px;
         accent-color: #10b981;
         flex-shrink: 0;
-      }
-
-      .rules-list {
-        text-align: left;
-        margin: 0;
-        padding: 0 0 0 1.2em;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        font-size: 0.9rem;
-        color: #cbd5e1;
-        max-width: 420px;
-      }
-      .rules-note {
-        margin: 0;
-        font-size: 0.76rem;
-        color: #6b7280;
-        max-width: 420px;
       }
 
       .toast {

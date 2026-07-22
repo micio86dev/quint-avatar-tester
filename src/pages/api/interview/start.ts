@@ -9,16 +9,15 @@ import {
   TAVUS_REPLICA_ID,
   TAVUS_PERSONA_ID,
 } from 'astro:env/server';
-import { composeQuestionPrompt, questions, type PriorAnswer } from '../../../lib/prompt';
-import { HEYGEN_END_PHRASE } from '../../../providers/types';
+import { composeInterviewPrompt, timezoneContext } from '../../../lib/prompt';
 import { rates } from '../../../lib/pricing';
-import { timing } from '../../../lib/timing';
+import { timing, resolveSessionCap } from '../../../lib/timing';
+import { parseStoredConfig } from '../admin/_helpers';
 import {
   createSession,
-  getCandidateById,
-  getProgress,
-  setProgressSession,
-  type SessionMeta,
+  getPrompt,
+  getTemplate,
+  getTemplateQuestions,
 } from '../../../lib/db';
 
 export const prerender = false;
@@ -40,75 +39,130 @@ const TAVUS_PARTICIPANT_LEFT_TIMEOUT = 5;
 const TAVUS_CONCURRENCY_RETRIES = 3;
 const TAVUS_CONCURRENCY_BACKOFF_MS = 2000;
 
-// Tavus-only: after its closing phrase the persona calls the end_interview tool (registered
-// once on the PAL). It reaches the client as a conversation.tool_call app-message and drives
-// the soft auto-advance. HeyGen has no equivalent hook, so this instruction is Tavus-scoped.
-const TAVUS_END_TOOL_INSTRUCTION =
-  '\n\nDopo la tua frase di conclusione per questa domanda, chiama SUBITO lo strumento ' +
-  'end_interview per segnalare che hai finito. Non annunciarlo: chiamalo in silenzio.';
+// A parsed provider-config blob (camelCase keys, matching the admin UI) or null when the
+// template has no config for the selected provider — fields then fall back to .env.
+type ProviderConfig = Record<string, unknown> | null;
 
-// HeyGen FULL mode has no tool-calling, so completion is signalled by SPEAKING a fixed
-// phrase. The client (heygen.ts matchesEndPhrase) detects it and drives the auto-advance.
-const HEYGEN_END_PHRASE_INSTRUCTION =
-  '\n\nQuando hai raccolto l’obiettivo di questa domanda, dopo la tua breve frase di ' +
-  `conclusione pronuncia ESATTAMENTE, parola per parola, questa frase finale e poi fermati: "${HEYGEN_END_PHRASE}"`;
-
+// Everything a start needs after validation + composition: the resolved session cap, the
+// composed context + greeting, the parsed provider config, and the session identifiers.
 interface StartRequest {
-  candidateId: number;
-  questionIndex: number;
-  questionId: string;
+  promptId: number;
+  templateId: number;
   systemPrompt: string;
   greeting: string;
-  meta: SessionMeta;
+  config: ProviderConfig;
+  cap: number;
   timezone: string | null;
 }
 
-// Parse + validate the request, then compose the per-question Italian context. Returns
-// either a ready-to-use StartRequest or an error Response.
+// Narrow a parsed config to a plain object (or null). Arrays and primitives are rejected.
+function asConfig(value: unknown): ProviderConfig {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+// Read a string config field, returning undefined when absent or empty so the caller
+// falls back to its .env default.
+function str(cfg: ProviderConfig, key: string): string | undefined {
+  const v = cfg?.[key];
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+// Read a number config field, returning undefined when absent or not finite.
+function num(cfg: ProviderConfig, key: string): number | undefined {
+  const v = cfg?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+// Read a boolean config field, returning undefined when absent so the caller can default.
+function bool(cfg: ProviderConfig, key: string): boolean | undefined {
+  const v = cfg?.[key];
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+// Read a string config field but ONLY accept a value from the documented allowlist.
+// Anything else (unknown/absent/wrong type) returns undefined so the caller falls back
+// to its default — an arbitrary string never reaches the provider.
+function oneOf<T extends string>(
+  cfg: ProviderConfig,
+  key: string,
+  allowed: readonly T[],
+): T | undefined {
+  const v = str(cfg, key);
+  return v !== undefined && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
+}
+
+// Documented HeyGen enum values. Config values outside these sets are ignored.
+const HEYGEN_INTERACTIVITY_TYPES = ['CONVERSATIONAL', 'PUSH_TO_TALK'] as const;
+const HEYGEN_VIDEO_QUALITIES = ['very_high', 'high', 'medium', 'low'] as const;
+const HEYGEN_VIDEO_ENCODINGS = ['H264', 'VP8'] as const;
+
+// Parse + validate the request, then compose the continuous Italian interview context.
+// Returns either a ready-to-use StartRequest or an error Response.
 function prepare(
-  body: { candidateId?: unknown; questionIndex?: unknown; timezone?: unknown } | null,
+  provider: 'heygen' | 'tavus',
+  body: { promptId?: unknown; templateId?: unknown; timezone?: unknown } | null,
 ): StartRequest | Response {
-  const candidateId = Number(body?.candidateId);
-  const questionIndex = Number(body?.questionIndex);
+  const promptId = Number(body?.promptId);
+  const templateId = Number(body?.templateId);
   const timezone = typeof body?.timezone === 'string' && body.timezone ? body.timezone : null;
 
-  if (!Number.isInteger(candidateId)) return json(400, { error: 'Invalid candidateId.' });
-  if (!Number.isInteger(questionIndex) || questionIndex < 0 || questionIndex >= questions.questions.length) {
-    return json(400, { error: 'questionIndex out of range.' });
+  if (!Number.isInteger(promptId) || promptId <= 0) return json(400, { error: 'Invalid promptId.' });
+  if (!Number.isInteger(templateId) || templateId <= 0) return json(400, { error: 'Invalid templateId.' });
+
+  const prompt = getPrompt(promptId);
+  if (!prompt) return json(404, { error: 'Unknown prompt.' });
+  const template = getTemplate(templateId);
+  if (!template) return json(404, { error: 'Unknown template.' });
+
+  const templateQuestions = getTemplateQuestions(templateId);
+  if (templateQuestions.length === 0) {
+    return json(400, { error: 'Template has no questions.' });
   }
-  if (!getCandidateById(candidateId)) return json(404, { error: 'Unknown candidate.' });
 
-  const question = questions.questions[questionIndex];
+  // Provider config is stored per-template as a JSON string (camelCase keys). Absent or
+  // unparseable → null, and every field falls back to its .env default.
+  const config = asConfig(
+    parseStoredConfig(provider === 'heygen' ? template.heygen_config : template.tavus_config),
+  );
 
-  // Recap = prior-index questions that already have a (raw-derived) answer summary.
-  const priorAnswers: PriorAnswer[] = getProgress(candidateId)
-    .filter((p) => p.question_index < questionIndex && p.answer_summary && p.answer_summary.trim())
-    .map((p) => ({
-      label: questions.questions[p.question_index]?.text ?? p.question_id ?? '',
-      text: p.answer_summary as string,
-    }));
+  const maxFromConfig =
+    provider === 'heygen'
+      ? num(config, 'maxSessionDurationSec')
+      : num(config, 'maxCallDurationSec');
+  const cap = resolveSessionCap(provider, maxFromConfig);
 
-  const { systemPrompt, greeting } = composeQuestionPrompt({
-    index: questionIndex,
-    isFirst: questionIndex === 0,
-    priorAnswers,
-    timeLimitSeconds: timing.limitSeconds,
+  // Non-empty fallback so the provider never receives an empty opening_text/custom_greeting.
+  // The Italian default is spoken content, so keep it in Italian.
+  const greeting = (prompt.greeting && prompt.greeting.trim()) || 'Ciao!';
+
+  const { systemPrompt, greeting: composedGreeting } = composeInterviewPrompt({
+    promptBody: prompt.body,
+    greeting,
+    questions: templateQuestions.map((q) => ({
+      name: q.name,
+      text: q.text,
+      objective: q.objective,
+    })),
+    provider,
+    maxSeconds: cap,
   });
 
   return {
-    candidateId,
-    questionIndex,
-    questionId: question.id,
+    promptId,
+    templateId,
     systemPrompt,
-    greeting,
-    meta: { candidateId, questionId: question.id, questionIndex, timezone: timezone ?? undefined },
+    greeting: composedGreeting,
+    config,
+    cap,
     timezone,
   };
 }
 
 export const POST: APIRoute = async ({ request, url }) => {
   const body = (await request.json().catch(() => null)) as
-    | { candidateId?: unknown; questionIndex?: unknown; provider?: unknown; timezone?: unknown }
+    | { promptId?: unknown; templateId?: unknown; provider?: unknown; timezone?: unknown }
     | null;
 
   const provider = (body?.provider as string) ?? url.searchParams.get('provider');
@@ -116,7 +170,7 @@ export const POST: APIRoute = async ({ request, url }) => {
     return json(400, { error: "'provider' must be 'heygen' or 'tavus'." });
   }
 
-  const prepared = prepare(body);
+  const prepared = prepare(provider, body);
   if (prepared instanceof Response) return prepared;
 
   try {
@@ -128,48 +182,56 @@ export const POST: APIRoute = async ({ request, url }) => {
   }
 };
 
-// Build a short timezone context preamble to inject into the persona system prompt so
-// the avatar knows the candidate's local date and time without guessing.
-function timezoneContext(tz: string | null): string {
-  if (!tz) return '';
-  try {
-    const localTime = new Date().toLocaleString('it-IT', {
-      timeZone: tz,
-      dateStyle: 'full',
-      timeStyle: 'short',
-    });
-    return `[Contesto temporale]\nFuso orario del candidato: ${tz}. Ora locale: ${localTime}.\n\n`;
-  } catch {
-    return '';
-  }
-}
-
-// Extra fields every successful start returns, so the client can drive the timer and
-// progress UI without reading server secrets.
+// Extra fields every successful start returns, so the client can drive the timer without
+// reading server secrets.
 function meta(req: StartRequest) {
   return {
     pricing: rates,
-    timeLimitSeconds: timing.limitSeconds,
+    sessionMaxSeconds: req.cap,
     warnSeconds: timing.warnSeconds,
-    questionIndex: req.questionIndex,
-    total: questions.questions.length,
   };
 }
 
 async function startHeygen(req: StartRequest): Promise<Response> {
   if (!LIVEAVATAR_API_KEY) return json(500, { error: 'Missing LIVEAVATAR_API_KEY in .env.' });
-  if (!LIVEAVATAR_AVATAR_ID || !LIVEAVATAR_VOICE_ID) {
-    return json(500, { error: 'Missing LIVEAVATAR_AVATAR_ID or LIVEAVATAR_VOICE_ID in .env.' });
+  const avatarId = str(req.config, 'avatarId') ?? LIVEAVATAR_AVATAR_ID;
+  const voiceId = str(req.config, 'voiceId') ?? LIVEAVATAR_VOICE_ID;
+  if (!avatarId || !voiceId) {
+    return json(500, { error: 'Missing HeyGen avatar_id or voice_id (config + .env).' });
   }
 
-  // A fresh Context per start: the prompt is candidate- and question-specific now, so
-  // there is nothing stable to cache (caching by version would inject the wrong question).
+  // A fresh Context per start: the prompt is template-specific and the completion
+  // instruction is baked in by composeInterviewPrompt, so there is nothing stable to cache.
   const contextId = await createHeygenContext(
-    timezoneContext(req.timezone) + req.systemPrompt + HEYGEN_END_PHRASE_INSTRUCTION,
+    timezoneContext(req.timezone) + req.systemPrompt,
     req.greeting,
-    req.questionId,
-    req.candidateId,
+    req.promptId,
+    req.templateId,
   );
+
+  // Build voice_settings only from the voice knobs present in the config; omit the whole
+  // object when none are set so HeyGen keeps its voice defaults.
+  const voiceSettings: Record<string, unknown> = {};
+  const speed = num(req.config, 'voiceSpeed');
+  if (speed !== undefined) voiceSettings.speed = speed;
+  const stability = num(req.config, 'voiceStability');
+  if (stability !== undefined) voiceSettings.stability = stability;
+  const similarityBoost = num(req.config, 'voiceSimilarityBoost');
+  if (similarityBoost !== undefined) voiceSettings.similarity_boost = similarityBoost;
+  const style = num(req.config, 'voiceStyle');
+  if (style !== undefined) voiceSettings.style = style;
+  const useSpeakerBoost = bool(req.config, 'voiceUseSpeakerBoost');
+  if (useSpeakerBoost !== undefined) voiceSettings.use_speaker_boost = useSpeakerBoost;
+
+  const avatarPersona: Record<string, unknown> = {
+    voice_id: voiceId,
+    context_id: contextId,
+    language: str(req.config, 'language') ?? LIVEAVATAR_LANGUAGE,
+  };
+  if (Object.keys(voiceSettings).length > 0) avatarPersona.voice_settings = voiceSettings;
+
+  // Only include a recognized encoding; an unknown value is omitted so HeyGen keeps its default.
+  const videoEncoding = oneOf(req.config, 'videoEncoding', HEYGEN_VIDEO_ENCODINGS);
 
   // FULL mode: HeyGen provides ASR + LLM + TTS. All avatar/voice/quality/language config
   // lives in the token request.
@@ -178,15 +240,16 @@ async function startHeygen(req: StartRequest): Promise<Response> {
     headers: { 'Content-Type': 'application/json', 'X-API-KEY': LIVEAVATAR_API_KEY },
     body: JSON.stringify({
       mode: 'FULL',
-      avatar_id: LIVEAVATAR_AVATAR_ID,
+      avatar_id: avatarId,
       is_sandbox: false,
-      video_settings: { quality: HEYGEN_VIDEO_QUALITY },
-      interactivity_type: 'CONVERSATIONAL',
-      avatar_persona: {
-        voice_id: LIVEAVATAR_VOICE_ID,
-        context_id: contextId,
-        language: LIVEAVATAR_LANGUAGE,
+      interactivity_type:
+        oneOf(req.config, 'interactivityType', HEYGEN_INTERACTIVITY_TYPES) ?? 'CONVERSATIONAL',
+      video_settings: {
+        quality: oneOf(req.config, 'videoQuality', HEYGEN_VIDEO_QUALITIES) ?? HEYGEN_VIDEO_QUALITY,
+        ...(videoEncoding ? { encoding: videoEncoding } : {}),
       },
+      max_session_duration: req.cap,
+      avatar_persona: avatarPersona,
     }),
   });
   const payload = await tokenRes.json().catch(() => null);
@@ -195,8 +258,11 @@ async function startHeygen(req: StartRequest): Promise<Response> {
   if (!data.session_token) throw new Error('LiveAvatar returned no session_token.');
 
   const providerSessionId: string | null = data.session_id ?? null;
-  const dbSessionId = createSession('heygen', providerSessionId, questions.version, req.meta);
-  setProgressSession(req.candidateId, req.questionIndex, dbSessionId);
+  const dbSessionId = createSession('heygen', providerSessionId, {
+    promptId: req.promptId,
+    templateId: req.templateId,
+    timezone: req.timezone ?? undefined,
+  });
 
   return json(200, {
     dbSessionId,
@@ -210,8 +276,8 @@ async function startHeygen(req: StartRequest): Promise<Response> {
 async function createHeygenContext(
   prompt: string,
   openingText: string,
-  questionId: string,
-  candidateId: number,
+  promptId: number,
+  templateId: number,
 ): Promise<string> {
   const res = await fetch(LA_CONTEXTS_URL, {
     method: 'POST',
@@ -219,8 +285,8 @@ async function createHeygenContext(
     body: JSON.stringify({
       // Context names must be UNIQUE per LiveAvatar account. A stable name collided on
       // every interview after the first ("Context with this name already exists"). We
-      // create a fresh context each start, so the name carries candidate id + timestamp.
-      name: `Colloquio v${questions.version} — ${questionId} — c${candidateId}-${Date.now()}`,
+      // create a fresh context each start, so the name carries prompt/template + timestamp.
+      name: `Colloquio — p${promptId} — t${templateId}-${Date.now()}`,
       prompt,
       opening_text: openingText,
     }),
@@ -238,8 +304,8 @@ async function createHeygenContext(
 }
 
 // Detects Tavus' concurrency-limit rejection (free tier allows only 1 concurrent
-// conversation). The previous question's /end can lag behind on Tavus' side, so a fresh
-// start briefly races an already-teardown conversation that still counts as active.
+// conversation). A prior /end can lag behind on Tavus' side, so a fresh start briefly
+// races an already-teardown conversation that still counts as active.
 function isConcurrencyLimit(detail: string): boolean {
   return /maximum concurrent conversations/i.test(detail);
 }
@@ -268,22 +334,35 @@ async function endActiveTavusConversations(): Promise<number> {
 }
 
 async function createTavusConversation(req: StartRequest): Promise<Response> {
+  // NOTE: Tavus persona-level knobs (llmModel / llmTemperature / tts* / turnTakingPatience /
+  // flow / idleEngagement, etc.) are properties of the PAL/persona, NOT of conversation
+  // create — they are selected today via the config's palId (persona_id below). Overriding
+  // them per-template would require PAL management (create/patch a persona), which is out of
+  // scope here, so we intentionally do NOT send them in the conversation body. Only
+  // conversation-level fields are applied.
+  const cfg = req.config;
   return fetch(TAVUS_CONVERSATIONS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': TAVUS_API_KEY as string },
     body: JSON.stringify({
-      replica_id: TAVUS_REPLICA_ID,
-      persona_id: TAVUS_PERSONA_ID,
-      // Tavus uses its OWN default LLM ("its brain"); the script is injected as context.
-      conversational_context: timezoneContext(req.timezone) + req.systemPrompt + TAVUS_END_TOOL_INSTRUCTION,
+      replica_id: str(cfg, 'faceId') ?? TAVUS_REPLICA_ID,
+      persona_id: str(cfg, 'palId') ?? TAVUS_PERSONA_ID,
+      // Tavus uses the persona's OWN LLM ("its brain"); the script (with the baked-in
+      // end_interview tool instruction from composeInterviewPrompt) is injected as context.
+      conversational_context: timezoneContext(req.timezone) + req.systemPrompt,
       custom_greeting: req.greeting,
+      audio_only: bool(cfg, 'audioOnly') ?? false,
       properties: {
-        language: 'italian',
-        enable_recording: false,
-        // Server-side hard cap so a session can't overrun the per-question budget
+        language: str(cfg, 'language') ?? 'italian',
+        enable_recording: bool(cfg, 'enableRecording') ?? false,
+        enable_closed_captions: bool(cfg, 'enableClosedCaptions') ?? false,
+        // Server-side hard cap so a session can't overrun the resolved budget
         // (fields confirmed in seconds against the Tavus OpenAPI spec).
-        max_call_duration: timing.limitSeconds,
-        participant_absent_timeout: timing.limitSeconds,
+        max_call_duration: req.cap,
+        participant_absent_timeout: Math.min(
+          num(cfg, 'participantAbsentTimeoutSec') ?? req.cap,
+          req.cap,
+        ),
         participant_left_timeout: TAVUS_PARTICIPANT_LEFT_TIMEOUT,
       },
     }),
@@ -292,19 +371,21 @@ async function createTavusConversation(req: StartRequest): Promise<Response> {
 
 async function startTavus(req: StartRequest): Promise<Response> {
   if (!TAVUS_API_KEY) return json(500, { error: 'Missing TAVUS_API_KEY in .env.' });
-  if (!TAVUS_REPLICA_ID || !TAVUS_PERSONA_ID) {
-    return json(500, { error: 'Missing TAVUS_REPLICA_ID or TAVUS_PERSONA_ID in .env.' });
+  const replicaId = str(req.config, 'faceId') ?? TAVUS_REPLICA_ID;
+  const personaId = str(req.config, 'palId') ?? TAVUS_PERSONA_ID;
+  if (!replicaId || !personaId) {
+    return json(500, { error: 'Missing Tavus replica_id or persona_id (config + .env).' });
   }
 
   let res = await createTavusConversation(req);
   let payload = await res.json().catch(() => null);
 
   // Concurrency rejection handling. On the free tier Tavus allows 1 concurrent
-  // conversation and releases that slot a few seconds AFTER the prior question's
-  // conversation reports 'ended' — so a fresh start briefly races a slot that is
-  // gone by status but not yet by accounting. The account often shows ZERO active
-  // conversations at this point, so there is nothing to reap: the only thing that
-  // works (as confirmed by manual re-click succeeding) is to wait and retry.
+  // conversation and releases that slot a few seconds AFTER the prior conversation reports
+  // 'ended' — so a fresh start briefly races a slot that is gone by status but not yet by
+  // accounting. The account often shows ZERO active conversations at this point, so there
+  // is nothing to reap: the only thing that works (confirmed by manual re-click
+  // succeeding) is to wait and retry.
   for (let attempt = 0; attempt < TAVUS_CONCURRENCY_RETRIES && !res.ok; attempt++) {
     const detail = String(payload?.message ?? payload?.error ?? `HTTP ${res.status}`);
     if (!isConcurrencyLimit(detail)) break;
@@ -323,7 +404,7 @@ async function startTavus(req: StartRequest): Promise<Response> {
       return json(429, {
         code: 'provider_busy',
         error:
-          'L’avatar sta ancora chiudendo la sessione precedente. Attendi qualche secondo e premi di nuovo “Parla”.',
+          'The avatar is still closing the previous session. Try again in a few seconds.',
       });
     }
     throw new Error(`Tavus rejected the conversation request: ${detail}`);
@@ -332,8 +413,11 @@ async function startTavus(req: StartRequest): Promise<Response> {
   const conversationId: string | null = payload?.conversation_id ?? null;
   if (!conversationUrl) throw new Error('Tavus returned no conversation_url.');
 
-  const dbSessionId = createSession('tavus', conversationId, questions.version, req.meta);
-  setProgressSession(req.candidateId, req.questionIndex, dbSessionId);
+  const dbSessionId = createSession('tavus', conversationId, {
+    promptId: req.promptId,
+    templateId: req.templateId,
+    timezone: req.timezone ?? undefined,
+  });
 
   return json(200, {
     dbSessionId,

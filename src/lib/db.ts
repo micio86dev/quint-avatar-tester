@@ -15,17 +15,14 @@ import {
 export type { IntegrityEventInput, IntegritySummary } from './proctor-config';
 
 export type Role = 'user' | 'avatar';
-export type ProgressStatus = 'pending' | 'completed' | 'timeout' | 'skipped';
 export type EndedReason = 'completed' | 'timeout' | 'user_stop' | 'error';
 
 export interface SessionRow {
   id: number;
   provider: string;
   provider_session_id: string | null;
-  questions_version: string | null;
-  candidate_id: number | null;
-  question_id: string | null;
-  question_index: number | null;
+  prompt_id: number | null;
+  template_id: number | null;
   ended_reason: string | null;
   started_at: string;
   ended_at: string | null;
@@ -49,28 +46,9 @@ export interface UtteranceInput {
   createdAt?: string;
 }
 
-export interface CandidateRow {
-  id: number;
-  display_name: string | null;
-  resume_code: string;
-  created_at: string;
-}
-
-export interface ProgressRow {
-  id: number;
-  candidate_id: number;
-  question_id: string | null;
-  question_index: number;
-  status: ProgressStatus;
-  session_id: number | null;
-  answer_summary: string | null;
-  updated_at: string;
-}
-
 export interface SessionMeta {
-  candidateId?: number;
-  questionId?: string;
-  questionIndex?: number;
+  promptId?: number;
+  templateId?: number;
   timezone?: string;
 }
 
@@ -116,26 +94,25 @@ function getDb(): Database.Database {
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
+// Record a new session for one continuous avatar interview. The session references the
+// prompt (persona) and template (ordered questions + provider config) it ran.
 export function createSession(
   provider: string,
   providerSessionId: string | null,
-  questionsVersion: string | null,
   meta: SessionMeta = {},
 ): number {
   const now = new Date().toISOString();
   const info = getDb()
     .prepare(
       `INSERT INTO sessions
-         (provider, provider_session_id, questions_version, candidate_id, question_id, question_index, timezone, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+         (provider, provider_session_id, prompt_id, template_id, timezone, started_at, ended_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
     )
     .run(
       provider,
       providerSessionId,
-      questionsVersion,
-      meta.candidateId ?? null,
-      meta.questionId ?? null,
-      meta.questionIndex ?? null,
+      meta.promptId ?? null,
+      meta.templateId ?? null,
       meta.timezone ?? null,
       now,
     );
@@ -203,90 +180,6 @@ export function getUtterances(sessionId: number): UtteranceRow[] {
     .all(sessionId) as UtteranceRow[];
 }
 
-// ── Candidates & progress ───────────────────────────────────────────────────────
-export function createCandidate(displayName: string | null, resumeCode: string): number {
-  const now = new Date().toISOString();
-  const info = getDb()
-    .prepare(`INSERT INTO candidates (display_name, resume_code, created_at) VALUES (?, ?, ?)`)
-    .run(displayName, resumeCode, now);
-  return Number(info.lastInsertRowid);
-}
-
-// Seed one 'pending' progress row per question, in order (atomic).
-export function seedProgress(
-  candidateId: number,
-  questions: { id: string }[],
-): void {
-  const conn = getDb();
-  const now = new Date().toISOString();
-  const ins = conn.prepare(
-    `INSERT INTO question_progress
-       (candidate_id, question_id, question_index, status, session_id, answer_summary, updated_at)
-     VALUES (?, ?, ?, 'pending', NULL, NULL, ?)`,
-  );
-  const tx = conn.transaction((items: { id: string }[]) => {
-    items.forEach((q, i) => ins.run(candidateId, q.id, i, now));
-  });
-  tx(questions);
-}
-
-export function getCandidateByCode(code: string): CandidateRow | undefined {
-  return getDb().prepare(`SELECT * FROM candidates WHERE resume_code = ?`).get(code) as
-    | CandidateRow
-    | undefined;
-}
-
-export function getCandidateById(id: number): CandidateRow | undefined {
-  return getDb().prepare(`SELECT * FROM candidates WHERE id = ?`).get(id) as
-    | CandidateRow
-    | undefined;
-}
-
-export function getProgress(candidateId: number): ProgressRow[] {
-  return getDb()
-    .prepare(`SELECT * FROM question_progress WHERE candidate_id = ? ORDER BY question_index`)
-    .all(candidateId) as ProgressRow[];
-}
-
-export function setProgressStatus(
-  candidateId: number,
-  questionIndex: number,
-  status: ProgressStatus,
-): void {
-  getDb()
-    .prepare(
-      `UPDATE question_progress SET status = ?, updated_at = ?
-       WHERE candidate_id = ? AND question_index = ?`,
-    )
-    .run(status, new Date().toISOString(), candidateId, questionIndex);
-}
-
-export function setProgressSession(
-  candidateId: number,
-  questionIndex: number,
-  sessionId: number,
-): void {
-  getDb()
-    .prepare(
-      `UPDATE question_progress SET session_id = ?, updated_at = ?
-       WHERE candidate_id = ? AND question_index = ?`,
-    )
-    .run(sessionId, new Date().toISOString(), candidateId, questionIndex);
-}
-
-export function setAnswerSummary(
-  candidateId: number,
-  questionIndex: number,
-  summary: string,
-): void {
-  getDb()
-    .prepare(
-      `UPDATE question_progress SET answer_summary = ?, updated_at = ?
-       WHERE candidate_id = ? AND question_index = ?`,
-    )
-    .run(summary, new Date().toISOString(), candidateId, questionIndex);
-}
-
 // ── Integrity (soft proctoring) ─────────────────────────────────────────────────
 // Batch-insert a client flush of integrity events for a session, in one transaction
 // (mirrors the replaceUtterances pattern). `meta` is serialized to a JSON string.
@@ -349,55 +242,6 @@ export function getSnapshots(sessionId: number): SnapshotRow[] {
   return getDb()
     .prepare(`SELECT * FROM webcam_snapshots WHERE session_id = ? ORDER BY ts`)
     .all(sessionId) as SnapshotRow[];
-}
-
-// ── Admin queries ──────────────────────────────────────────────────────────────
-
-export interface CandidateListRow extends CandidateRow {
-  session_count: number;
-  completed_questions: number;
-  total_questions: number;
-  last_activity: string | null;
-  providers_used: string | null; // GROUP_CONCAT of distinct providers
-  total_heygen_min: number; // sum of completed HeyGen session durations
-  total_tavus_min: number; // sum of completed Tavus session durations
-}
-
-export function getAllCandidates(): CandidateListRow[] {
-  return getDb()
-    .prepare(
-      `SELECT
-         c.id, c.display_name, c.resume_code, c.created_at,
-         COUNT(DISTINCT s.id) AS session_count,
-         SUM(CASE WHEN qp.status = 'completed' THEN 1 ELSE 0 END) AS completed_questions,
-         COUNT(DISTINCT qp.id) AS total_questions,
-         MAX(COALESCE(s.ended_at, s.started_at)) AS last_activity,
-         GROUP_CONCAT(DISTINCT s.provider) AS providers_used,
-         SUM(CASE WHEN s.provider = 'heygen' AND s.ended_at IS NOT NULL
-               THEN (julianday(s.ended_at) - julianday(s.started_at)) * 1440.0
-               ELSE 0 END) AS total_heygen_min,
-         SUM(CASE WHEN s.provider = 'tavus' AND s.ended_at IS NOT NULL
-               THEN (julianday(s.ended_at) - julianday(s.started_at)) * 1440.0
-               ELSE 0 END) AS total_tavus_min
-       FROM candidates c
-       LEFT JOIN sessions s ON s.candidate_id = c.id
-       LEFT JOIN question_progress qp ON qp.candidate_id = c.id
-       GROUP BY c.id
-       ORDER BY last_activity DESC, c.created_at DESC`,
-    )
-    .all() as CandidateListRow[];
-}
-
-// First question by index that is NOT completed (pending or timed-out both re-run) —
-// this is the "retry on resume" landing point. null when every question is completed.
-export function getNextQuestionIndex(candidateId: number): number | null {
-  const row = getDb()
-    .prepare(
-      `SELECT MIN(question_index) AS idx FROM question_progress
-       WHERE candidate_id = ? AND status != 'completed'`,
-    )
-    .get(candidateId) as { idx: number | null };
-  return row?.idx ?? null;
 }
 
 // ── Prompts (avatar-prompt catalog) ──────────────────────────────────────────────

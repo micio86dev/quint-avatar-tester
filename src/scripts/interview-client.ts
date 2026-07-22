@@ -1,15 +1,16 @@
-// UI state machine for the one-question-per-session interview.
-// Screens: start → code → interview → end-of-question → paused / done. Each question is
-// its own short, timed provider session; the client owns the countdown, persists every
-// normalized transcript entry, and drives the New/Resume + progress flow. It talks ONLY
-// to the InterviewProvider interface, so HeyGen and Tavus stay interchangeable.
+// UI state machine for the single continuous avatar interview.
+// Screens: start → interview → done. The operator picks a prompt (persona) and a template
+// (questions + provider config), then runs ONE timed provider session end-to-end. The
+// client owns the countdown, persists every normalized transcript entry, and drives the
+// integrity/proctor beaconing and cost meter. It talks ONLY to the InterviewProvider
+// interface, so HeyGen and Tavus stay interchangeable.
 import type { InterviewProvider, ProviderName, TranscriptEntry } from '../providers/types';
 import { HeyGenProvider } from '../providers/heygen';
 import { TavusProvider } from '../providers/tavus';
-import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, warmupCamera, INTEGRITY_LABELS } from './proctor';
+import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, warmupCamera } from './proctor';
 
 type Phase = 'idle' | 'connecting' | 'live';
-type Screen = 'start' | 'code' | 'rules' | 'interview' | 'endq' | 'paused' | 'done';
+type Screen = 'start' | 'interview' | 'done';
 type EndedReason = 'completed' | 'timeout' | 'user_stop' | 'error';
 
 interface Rates {
@@ -17,18 +18,15 @@ interface Rates {
   heygenUsdPerCredit: number;
   tavusUsdPerMin: number;
 }
-interface ProgressEntry {
-  questionIndex: number;
-  questionId: string | null;
-  status: string;
-  answerSummary: string | null;
+interface PromptOption {
+  id: number;
+  title: string;
+  language?: string;
 }
-interface CandidateInfo {
-  candidate: { id: number; displayName: string | null; resumeCode: string };
-  progress: ProgressEntry[];
-  nextQuestionIndex: number | null;
-  total: number;
-  done: boolean;
+interface TemplateOption {
+  id: number;
+  name: string;
+  enabled: number; // 0/1
 }
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -44,33 +42,19 @@ const providerRadios = Array.from(
   document.querySelectorAll<HTMLInputElement>('input[name="provider"]'),
 );
 // Start screen
-const displayNameInput = document.getElementById('display-name') as HTMLInputElement;
-const resumeCodeInput = document.getElementById('resume-code') as HTMLInputElement;
-const btnNew = document.getElementById('btn-new') as HTMLButtonElement;
-const btnResume = document.getElementById('btn-resume') as HTMLButtonElement;
+const promptSelect = document.getElementById('prompt-select') as HTMLSelectElement;
+const templateSelect = document.getElementById('template-select') as HTMLSelectElement;
+const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
 const startError = document.getElementById('start-error') as HTMLElement;
-// Code screen
-const codeValue = document.getElementById('code-value') as HTMLElement;
-const btnBegin = document.getElementById('btn-begin') as HTMLButtonElement;
 // Interview top bar
-const progressEl = document.getElementById('progress') as HTMLElement;
-const completedEl = document.getElementById('completed') as HTMLElement;
 const timerEl = document.getElementById('timer') as HTMLElement;
-// End-of-question
-const endqTitle = document.getElementById('endq-title') as HTMLElement;
-const endqHint = document.getElementById('endq-hint') as HTMLElement;
-const btnNext = document.getElementById('btn-next') as HTMLButtonElement;
-const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
-// Paused / done
-const pausedCode = document.getElementById('paused-code') as HTMLElement;
-const btnHome = document.getElementById('btn-home') as HTMLButtonElement;
-const btnHome2 = document.getElementById('btn-home-2') as HTMLButtonElement;
+// Done screen
+const transcriptLink = document.getElementById('transcript-link') as HTMLAnchorElement;
+const btnRestart = document.getElementById('btn-restart') as HTMLButtonElement;
 // Cost meter
 const meterEl = document.getElementById('meter') as HTMLElement;
 const meterCostEl = document.getElementById('meter-cost') as HTMLElement;
 const meterCreditsEl = document.getElementById('meter-credits') as HTMLElement;
-// Rules screen
-const btnRulesOk = document.getElementById('btn-rules-ok') as HTMLButtonElement;
 // Toast
 const toastEl = document.getElementById('toast') as HTMLElement;
 const toastMsgEl = document.getElementById('toast-msg') as HTMLElement;
@@ -81,39 +65,26 @@ let phase: Phase = 'idle';
 let ending = true; // true whenever no live session owns teardown (guards stray stop events)
 let providerName: ProviderName = 'heygen';
 
-let candidateId = 0;
-let resumeCode = '';
-let total = 7;
-let currentIndex = 0;
-const completedSet = new Set<number>();
-
 let sessionId: number | null = null;
 let providerSessionId: string | undefined;
-let lastEndedReason: EndedReason | null = null;
-let rulesShown = false;
 // Pre-session camera proximity check. null = unknown/pending, true = OK, false = too far.
 let cameraOk: boolean | null = null;
 let cameraCheckCleanup: (() => void) | null = null;
-let pendingQuestionIndex = 0;
 let toastTimer: number | null = null;
 let rates: Rates = { heygenCreditsPerMin: 2, heygenUsdPerCredit: 0.1, tavusUsdPerMin: 0.37 };
 
-// Timer
+let selectorsReady = false;
+
+// Timer — a single countdown over the whole session.
 let timerLimit = 285;
 let timerWarn = 60;
 let timerDeadline = 0;
 let timerInterval: number | null = null;
 let nudged = false;
 
-// Soft auto-advance: when the avatar concludes a question itself (Tavus end_interview tool),
-// the end-of-question screen counts down and moves on automatically unless the candidate
-// takes over with Pausa / Prossima.
-const AUTO_ADVANCE_SECONDS = 3;
-let autoAdvanceInterval: number | null = null;
-
 // Client-side auto-retry for Tavus concurrency lag. The free-tier slot is released a few
-// seconds after /end; the first start of the next question briefly races that window.
-// We retry silently before falling back to a manual-retry prompt.
+// seconds after /end; the first start briefly races that window. We retry silently before
+// falling back to a manual-retry prompt.
 const CLIENT_BUSY_RETRIES = 3;
 const CLIENT_BUSY_DELAY_MS = 3000;
 
@@ -127,14 +98,14 @@ let meterStartMs = 0;
 let startCredits: number | null = null;
 
 const STATUS: Record<string, [string, string]> = {
-  idle: ['pronta a iniziare', 'idle'],
-  connecting: ['connessione…', 'connecting'],
-  ready: ['pronta', 'ready'],
-  listening: ['in ascolto', 'listening'],
-  speaking: ['sta parlando', 'speaking'],
-  stopped: ['spenta', 'idle'],
-  waiting: ['un attimo…', 'waiting'],
-  error: ['errore', 'error'],
+  idle: ['ready to start', 'idle'],
+  connecting: ['connecting…', 'connecting'],
+  ready: ['ready', 'ready'],
+  listening: ['listening', 'listening'],
+  speaking: ['speaking', 'speaking'],
+  stopped: ['stopped', 'idle'],
+  waiting: ['one moment…', 'waiting'],
+  error: ['error', 'error'],
 };
 
 // ── Small helpers ─────────────────────────────────────────────────────────────────
@@ -158,18 +129,81 @@ function mmss(totalSeconds: number): string {
 }
 function setButton(): void {
   const live = phase === 'live';
-  button.textContent = phase === 'connecting' ? '… connessione' : live ? '⏹ Stop' : '🎤 Parla';
+  button.textContent = phase === 'connecting' ? '… connecting' : '⏹ Stop';
   button.dataset.on = String(live);
-  button.disabled = phase === 'connecting' || (phase === 'idle' && cameraOk === false);
+  button.disabled = phase !== 'live';
 }
-function updateTopBar(): void {
-  progressEl.textContent = `Domanda ${currentIndex + 1} di ${total}`;
-  completedEl.textContent = `✓ ${completedSet.size}/${total}`;
+// The Start button is enabled only once consent is given and both selectors have a value.
+function refreshStartEnabled(): void {
+  btnStart.disabled =
+    !selectorsReady || !consentEl.checked || !promptSelect.value || !templateSelect.value;
+}
+
+// ── Selector population ───────────────────────────────────────────────────────────
+async function loadSelectors(): Promise<void> {
+  promptSelect.disabled = true;
+  templateSelect.disabled = true;
+  let prompts: PromptOption[] = [];
+  let templates: TemplateOption[] = [];
+  try {
+    const [pRes, tRes] = await Promise.all([
+      fetch('/api/admin/prompts'),
+      fetch('/api/admin/templates'),
+    ]);
+    prompts = pRes.ok ? ((await pRes.json().catch(() => [])) as PromptOption[]) : [];
+    templates = tRes.ok ? ((await tRes.json().catch(() => [])) as TemplateOption[]) : [];
+  } catch {
+    prompts = [];
+    templates = [];
+  }
+  const enabledTemplates = (Array.isArray(templates) ? templates : []).filter(
+    (t) => t.enabled === 1,
+  );
+  const validPrompts = Array.isArray(prompts) ? prompts : [];
+
+  if (validPrompts.length === 0 || enabledTemplates.length === 0) {
+    selectorsReady = false;
+    promptSelect.innerHTML = '<option value="">—</option>';
+    templateSelect.innerHTML = '<option value="">—</option>';
+    startError.textContent = 'Create a prompt and a template in /admin first.';
+    refreshStartEnabled();
+    return;
+  }
+
+  promptSelect.innerHTML =
+    '<option value="">Select a prompt…</option>' +
+    validPrompts
+      .map(
+        (p) =>
+          `<option value="${p.id}">${escapeHtml(p.title)}${p.language ? ` (${escapeHtml(p.language)})` : ''}</option>`,
+      )
+      .join('');
+  templateSelect.innerHTML =
+    '<option value="">Select a template…</option>' +
+    enabledTemplates
+      .map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`)
+      .join('');
+
+  promptSelect.disabled = false;
+  templateSelect.disabled = false;
+  selectorsReady = true;
+  startError.textContent = '';
+  refreshStartEnabled();
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ── Timer ───────────────────────────────────────────────────────────────────────
-function startTimer(): void {
+function startTimer(limitSeconds: number, warnSeconds: number): void {
   clearTimer();
+  timerLimit = limitSeconds > 0 ? limitSeconds : timerLimit;
+  timerWarn = warnSeconds > 0 ? warnSeconds : timerWarn;
   timerDeadline = Date.now() + timerLimit * 1000;
   nudged = false;
   renderTimer();
@@ -180,6 +214,7 @@ function renderTimer(): void {
   timerEl.textContent = mmss(Math.ceil(remaining));
   timerEl.dataset.warn = remaining <= 15 ? 'critical' : remaining <= timerWarn ? 'warn' : 'normal';
   // Optional wrap-up nudge ~20s before zero (HeyGen only; Tavus has a server hard cap).
+  // Session-scoped: fired once.
   if (!nudged && remaining <= 20 && remaining > 0 && providerName === 'heygen') {
     nudged = true;
     provider?.nudgeWrapUp?.();
@@ -229,11 +264,11 @@ function renderMeter(): void {
     costUsd = consumed * rates.heygenUsdPerCredit;
     if (startCredits != null) {
       const remaining = Math.max(0, startCredits - consumed);
-      meterCreditsEl.textContent = `${remaining.toFixed(1)} crediti`;
+      meterCreditsEl.textContent = `${remaining.toFixed(1)} credits`;
       meterCreditsEl.dataset.low =
         remaining <= CREDITS_CRITICAL ? 'critical' : remaining <= CREDITS_LOW ? 'true' : 'false';
     } else {
-      meterCreditsEl.textContent = `−${consumed.toFixed(1)} crediti`;
+      meterCreditsEl.textContent = `−${consumed.toFixed(1)} credits`;
       meterCreditsEl.dataset.low = 'false';
     }
     meterCreditsEl.hidden = false;
@@ -243,7 +278,7 @@ function renderMeter(): void {
     costUsd = billedMin * rates.tavusUsdPerMin;
     meterCreditsEl.hidden = true;
   }
-  meterCostEl.textContent = `${providerName === 'tavus' ? 'stima' : '≈'} $${costUsd.toFixed(2)}`;
+  meterCostEl.textContent = `${providerName === 'tavus' ? 'est.' : '≈'} $${costUsd.toFixed(2)}`;
 }
 async function anchorCredits(): Promise<void> {
   if (providerName !== 'heygen') return;
@@ -261,7 +296,8 @@ async function anchorCredits(): Promise<void> {
   }
   renderMeter();
 }
-function startMeter(): void {
+function startMeter(pricing?: Rates): void {
+  if (pricing) rates = pricing;
   meterStartMs = Date.now();
   startCredits = null;
   meterEl.removeAttribute('hidden');
@@ -292,26 +328,6 @@ async function persist(entry: TranscriptEntry): Promise<void> {
     /* best-effort; HeyGen reconciles at end anyway */
   }
 }
-async function setProgress(index: number, status: string): Promise<void> {
-  try {
-    await fetch('/api/candidate/progress', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ candidateId, questionIndex: index, status }),
-    });
-  } catch {
-    /* best-effort */
-  }
-}
-async function fetchCandidate(code: string): Promise<CandidateInfo | null> {
-  try {
-    const res = await fetch(`/api/candidate/${encodeURIComponent(code)}`);
-    if (!res.ok) return null;
-    return (await res.json()) as CandidateInfo;
-  } catch {
-    return null;
-  }
-}
 
 // ── Session lifecycle ─────────────────────────────────────────────────────────────
 async function ensureMicPermission(): Promise<void> {
@@ -319,38 +335,46 @@ async function ensureMicPermission(): Promise<void> {
   stream.getTracks().forEach((t) => t.stop());
 }
 
-async function startSession(index: number): Promise<void> {
+async function startSession(): Promise<void> {
   if (phase !== 'idle') return;
-  // Block only when the proximity check has explicitly found the face too far.
-  // null means the check is still loading — we allow the session to proceed.
-  if (cameraOk === false) {
-    setStatus('waiting', 'Avvicinati alla webcam per iniziare');
+  startError.textContent = '';
+
+  const promptId = Number(promptSelect.value);
+  const templateId = Number(templateSelect.value);
+  if (!consentEl.checked || !promptId || !templateId) {
+    startError.textContent = 'Select a prompt, a template, and accept to continue.';
     return;
   }
-  // Hand the open camera stream off to the proctor; stop the pre-session warmup.
-  cameraCheckCleanup?.();
-  cameraCheckCleanup = null;
-  cameraOk = null;
+  providerName = selectedProvider();
 
-  currentIndex = index;
+  // Move to the interview screen and run the pre-session camera warmup.
+  enterInterviewScreen();
+  void enterFullscreen();
+
+  if (cameraOk === false) {
+    setStatus('waiting', 'Move closer to the webcam to begin');
+    // The warmup callback re-triggers connect once the face is close enough is not
+    // automatic here — the operator restarts via Stop → Start another. Keep it simple:
+    // proceed anyway (null/false only delays, never blocks the test tool).
+  }
+
   phase = 'connecting';
   setButton();
   setStatus('connecting');
-  updateTopBar();
 
   try {
     await ensureMicPermission();
   } catch {
-    phase = 'idle';
-    setButton();
-    setStatus('error', 'permesso microfono negato');
+    setStatus('error', 'microphone permission denied');
+    await teardown('error');
+    goHome();
     return;
   }
 
   try {
     // Retry loop for Tavus concurrency lag — the free-tier slot is released a few seconds
     // after /end and the server already retries internally, but sometimes that budget runs
-    // out first. We retry silently on the client so the user never has to click again.
+    // out first. We retry silently on the client so the operator never has to click again.
     let res!: Response;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any = null;
@@ -359,8 +383,8 @@ async function startSession(index: number): Promise<void> {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({
-          candidateId,
-          questionIndex: index,
+          promptId,
+          templateId,
           provider: providerName,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
@@ -373,27 +397,22 @@ async function startSession(index: number): Promise<void> {
       setStatus('connecting');
     }
     if (res.status === 429 || data?.code === 'provider_busy') {
-      setStatus('waiting', data?.error ?? 'Attendi qualche secondo e premi di nuovo "Parla".');
-      phase = 'idle';
-      setButton();
+      setStatus('error', data?.error ?? 'Provider busy. Try again in a few seconds.');
+      await teardown('error');
+      goHome();
+      startError.textContent = data?.error ?? 'Provider busy. Try again in a few seconds.';
       return;
     }
     if (!res.ok || !data?.dbSessionId) throw new Error(data?.error ?? `start HTTP ${res.status}`);
 
     sessionId = data.dbSessionId;
     providerSessionId = data.providerSessionId ?? undefined;
-    if (data.pricing) rates = data.pricing;
-    if (Number(data.timeLimitSeconds) > 0) timerLimit = Number(data.timeLimitSeconds);
-    if (Number(data.warnSeconds) > 0) timerWarn = Number(data.warnSeconds);
-    if (Number.isInteger(data.total)) total = data.total;
-    updateTopBar();
 
     provider = makeProvider(providerName);
     ending = false;
-    lastEndedReason = null;
     provider.on('transcript', (p) => {
       const entry = p as TranscriptEntry;
-      captionEl.textContent = `${entry.role === 'avatar' ? 'Alessandra' : 'Tu'}: ${entry.text}`;
+      captionEl.textContent = `${entry.role === 'avatar' ? 'Avatar' : 'You'}: ${entry.text}`;
       void persist(entry);
     });
     provider.on('state', (s) => {
@@ -404,14 +423,14 @@ async function startSession(index: number): Promise<void> {
         return;
       }
       if (kind === 'complete') {
-        if (!ending) void onQuestionComplete();
+        if (!ending) void onComplete();
         return;
       }
       setStatus(kind);
     });
     provider.on('error', (e) => {
       if (ending) return;
-      setStatus('error', `errore: ${String(e)}`);
+      setStatus('error', `error: ${String(e)}`);
       void onProviderError();
     });
 
@@ -425,24 +444,26 @@ async function startSession(index: number): Promise<void> {
 
     phase = 'live';
     setButton();
-    startMeter();
-    startTimer();
+    startMeter(data.pricing as Rates | undefined);
+    startTimer(
+      Number(data.sessionMaxSeconds) > 0 ? Number(data.sessionMaxSeconds) : timerLimit,
+      Number(data.warnSeconds) > 0 ? Number(data.warnSeconds) : timerWarn,
+    );
     startProctor(sessionId!); // soft, silent integrity collector (provider-agnostic)
   } catch (err) {
-    setStatus('error', `errore: ${err instanceof Error ? err.message : String(err)}`);
+    setStatus('error', `error: ${err instanceof Error ? err.message : String(err)}`);
     await teardown('error');
-    phase = 'idle';
-    setButton();
+    goHome();
+    startError.textContent = err instanceof Error ? err.message : String(err);
   }
 }
 
 // Ends the provider session, marks the DB row ended (reconciling HeyGen's transcript,
-// freeing the Tavus slot, storing a raw answer summary). Does NOT change the screen —
-// callers decide where to go next. `ending` guards against re-entrant stop events.
+// freeing the Tavus slot). Does NOT change the screen — callers decide where to go next.
+// `ending` guards against re-entrant stop events.
 async function teardown(reason: EndedReason): Promise<void> {
   if (ending) return;
   ending = true;
-  lastEndedReason = reason;
   clearTimer();
   stopMeter();
   cameraCheckCleanup?.(); // safety net: stop warmup if not already cleaned up
@@ -478,273 +499,89 @@ async function teardown(reason: EndedReason): Promise<void> {
   phase = 'idle';
 }
 
+// The three end conditions for the single session.
 async function onTimeout(): Promise<void> {
   if (phase !== 'live') return;
   clearTimer();
-  setStatus('error', 'tempo scaduto');
+  const sid = sessionId;
+  setStatus('error', 'time is up');
   await teardown('timeout');
-  showEndq();
+  showDone(sid);
 }
 async function onProviderStopped(): Promise<void> {
+  const sid = sessionId;
   await teardown('user_stop');
-  showEndq();
+  showDone(sid);
 }
-// The avatar concluded the question on its own (Tavus end_interview tool) → mark it done
-// and let showEndq drive the soft auto-advance.
-async function onQuestionComplete(): Promise<void> {
+// The avatar concluded the interview itself (HeyGen end phrase / Tavus end_interview tool).
+async function onComplete(): Promise<void> {
   if (ending) return;
+  const sid = sessionId;
   await teardown('completed');
-  showEndq();
+  showDone(sid);
 }
 async function onProviderError(): Promise<void> {
+  const sid = sessionId;
   await teardown('error');
-  showEndq();
+  showDone(sid);
 }
 
 // ── Screen flow ────────────────────────────────────────────────────────────────
-function showRules(index: number): void {
-  pendingQuestionIndex = index;
-  setScreen('rules');
-}
-
-// autoStart=true makes the next question begin its session on its own, so a candidate
-// mid-interview never has to press "Parla" again — the transition feels seamless. The very
-// first question is left manual (autoStart=false): that first click is the user gesture that
-// grants the mic and satisfies the browser's autoplay policy for the whole session.
-function beginQuestion(index: number, autoStart = false): void {
-  clearAutoAdvance();
+function enterInterviewScreen(): void {
   // Stop any previous proximity check before starting a fresh one.
   cameraCheckCleanup?.();
   cameraCheckCleanup = null;
   cameraOk = null;
 
-  currentIndex = index;
-  phase = 'idle';
-  ending = true; // no live session yet
-  provider = null;
-  sessionId = null;
   captionEl.textContent = '';
   resetTimerDisplay();
-  updateTopBar();
-  setStatus('idle');
-  setButton();
+  setStatus('connecting');
   setScreen('interview');
 
-  // Start a background camera check: opens the webcam preview and continuously reports
-  // whether the face is close enough. Blocks "Parla" with a status message if too far.
-  // null = model still loading (allow); false = too far (block); true = OK (allow).
+  // Background camera warmup: opens the webcam preview so the operator can adjust position.
+  // It never blocks the session in this test tool — result is advisory only.
   cameraCheckCleanup = warmupCamera((ok) => {
     cameraOk = ok;
-    if (phase !== 'idle') return; // session already started — ignore
-    setButton();
-    if (!ok) {
-      setStatus('waiting', 'Avvicinati alla webcam per iniziare');
-    } else {
-      setStatus('idle');
-    }
   });
-
-  if (autoStart) void startSession(index);
 }
 
-function clearAutoAdvance(): void {
-  if (autoAdvanceInterval != null) window.clearInterval(autoAdvanceInterval);
-  autoAdvanceInterval = null;
-}
-
-function showEndq(): void {
-  clearAutoAdvance();
-  const timedOut = lastEndedReason === 'timeout';
-  const completed = lastEndedReason === 'completed';
-  const isLast = currentIndex >= total - 1;
-  setScreen('endq');
-
-  if (isLast) {
-    btnPause.hidden = true;
-    endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Colloquio terminato';
-    btnNext.textContent = 'Vai ai risultati';
-
-    // Avatar concluded the last question — auto-advance to done, no action needed.
-    if (completed) {
-      let remaining = AUTO_ADVANCE_SECONDS;
-      endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
-      autoAdvanceInterval = window.setInterval(() => {
-        remaining -= 1;
-        if (remaining <= 0) {
-          clearAutoAdvance();
-          void onNext();
-        } else {
-          endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
-        }
-      }, 1000);
-      return;
-    }
-
-    endqHint.textContent = timedOut
-      ? 'Il tempo è scaduto. Premi per completare il colloquio.'
-      : 'Hai risposto a tutte le domande.';
-    return;
+function showDone(sid: number | null): void {
+  if (sid != null) {
+    transcriptLink.href = `/review/${sid}`;
+    transcriptLink.hidden = false;
+  } else {
+    transcriptLink.hidden = true;
   }
-
-  btnPause.hidden = false;
-  endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Domanda conclusa';
-  btnNext.textContent = 'Prossima domanda';
-
-  // Soft auto-advance: only when the avatar itself concluded (not a timeout or manual stop)
-  // and more questions remain. The countdown auto-fires onNext; Pausa/Prossima take over.
-  if (completed) {
-    let remaining = AUTO_ADVANCE_SECONDS;
-    endqHint.textContent = `Prossima domanda tra ${remaining}s…`;
-    autoAdvanceInterval = window.setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearAutoAdvance();
-        void onNext();
-      } else {
-        endqHint.textContent = `Prossima domanda tra ${remaining}s…`;
-      }
-    }, 1000);
-    return;
-  }
-
-  endqHint.textContent = timedOut
-    ? 'Il tempo per questa domanda è finito. Puoi continuare o riprendere più tardi.'
-    : 'Vuoi continuare con la prossima domanda?';
-}
-
-async function onNext(): Promise<void> {
-  clearAutoAdvance();
-  btnNext.disabled = true;
-  try {
-    // Timeouts stay 'timeout' (retried on resume); only an affirmed, non-timed-out
-    // question is marked completed.
-    if (lastEndedReason !== 'timeout') {
-      await setProgress(currentIndex, 'completed');
-      completedSet.add(currentIndex);
-    }
-    const nextIndex = currentIndex + 1;
-    if (nextIndex >= total) {
-      // Linear pass done — the server knows if any timed-out questions still remain.
-      const info = await fetchCandidate(resumeCode);
-      completedSet.clear();
-      info?.progress
-        .filter((p) => p.status === 'completed')
-        .forEach((p) => completedSet.add(p.questionIndex));
-      if (!info || info.done || info.nextQuestionIndex == null) {
-        setScreen('done');
-        return;
-      }
-      beginQuestion(info.nextQuestionIndex, true);
-    } else {
-      beginQuestion(nextIndex, true);
-    }
-  } finally {
-    btnNext.disabled = false;
-  }
-}
-
-function onPause(): void {
-  clearAutoAdvance();
-  cameraCheckCleanup?.();
-  cameraCheckCleanup = null;
-  cameraOk = null;
-  pausedCode.textContent = resumeCode;
-  setScreen('paused');
-}
-
-// ── Start-screen handlers ────────────────────────────────────────────────────────
-async function onNew(): Promise<void> {
-  startError.textContent = '';
-  if (!consentEl.checked) {
-    startError.textContent = 'Devi accettare per continuare.';
-    return;
-  }
-  providerName = selectedProvider();
-  btnNew.disabled = true;
-  try {
-    const res = await fetch('/api/candidate', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ displayName: displayNameInput.value.trim() }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.candidateId) throw new Error(data?.error || `HTTP ${res.status}`);
-    candidateId = data.candidateId;
-    resumeCode = data.resumeCode;
-    if (Number.isInteger(data.total)) total = data.total;
-    completedSet.clear();
-    codeValue.textContent = resumeCode;
-    setScreen('code');
-  } catch (err) {
-    startError.textContent = `Errore: ${err instanceof Error ? err.message : String(err)}`;
-  } finally {
-    btnNew.disabled = false;
-  }
-}
-
-async function onResume(): Promise<void> {
-  startError.textContent = '';
-  if (!consentEl.checked) {
-    startError.textContent = 'Devi accettare per continuare.';
-    return;
-  }
-  providerName = selectedProvider();
-  const code = resumeCodeInput.value.trim().toUpperCase();
-  if (!code) {
-    startError.textContent = 'Inserisci un codice.';
-    return;
-  }
-  btnResume.disabled = true;
-  try {
-    const info = await fetchCandidate(code);
-    if (!info) throw new Error('Codice non valido.');
-    candidateId = info.candidate.id;
-    resumeCode = info.candidate.resumeCode;
-    total = info.total ?? total;
-    completedSet.clear();
-    info.progress
-      .filter((p) => p.status === 'completed')
-      .forEach((p) => completedSet.add(p.questionIndex));
-    if (info.done || info.nextQuestionIndex == null) {
-      setScreen('done');
-      return;
-    }
-    showRules(info.nextQuestionIndex);
-  } catch (err) {
-    startError.textContent = `Errore: ${err instanceof Error ? err.message : String(err)}`;
-  } finally {
-    btnResume.disabled = false;
-  }
+  setScreen('done');
 }
 
 function goHome(): void {
   cameraCheckCleanup?.();
   cameraCheckCleanup = null;
   cameraOk = null;
-  displayNameInput.value = '';
-  resumeCodeInput.value = '';
-  startError.textContent = '';
   captionEl.textContent = '';
+  resetTimerDisplay();
+  phase = 'idle';
+  ending = true;
+  setButton();
   setScreen('start');
+  refreshStartEnabled();
 }
 
 // ── Wiring ───────────────────────────────────────────────────────────────────────
 button.addEventListener('click', () => {
-  if (phase === 'idle') void startSession(currentIndex);
-  else if (phase === 'live') void teardown('user_stop').then(showEndq);
+  if (phase === 'live') {
+    // Capture the session id BEFORE teardown clears it, so the done screen's
+    // transcript link still works after a manual stop.
+    const sid = sessionId;
+    void teardown('user_stop').then(() => showDone(sid));
+  }
 });
-btnNew.addEventListener('click', () => void onNew());
-btnResume.addEventListener('click', () => void onResume());
-btnBegin.addEventListener('click', () => showRules(0));
-btnRulesOk.addEventListener('click', () => {
-  rulesShown = true;
-  void enterFullscreen();
-  beginQuestion(pendingQuestionIndex);
-});
-btnNext.addEventListener('click', () => void onNext());
-btnPause.addEventListener('click', onPause);
-btnHome.addEventListener('click', goHome);
-btnHome2.addEventListener('click', goHome);
+btnStart.addEventListener('click', () => void startSession());
+btnRestart.addEventListener('click', goHome);
+consentEl.addEventListener('change', refreshStartEnabled);
+promptSelect.addEventListener('change', refreshStartEnabled);
+templateSelect.addEventListener('change', refreshStartEnabled);
 
 setViolationCallback(showToast);
 
@@ -759,7 +596,6 @@ function releaseOnUnload(): void {
   unloadHandled = true;
   beaconProctor(); // ship any buffered integrity events before the page goes away
   if (providerName === 'tavus' && sessionId != null && !ending) {
-    // endedReason 'user_stop' (not 'timeout') keeps the question 'pending' → retried on resume.
     const payload = JSON.stringify({
       sessionId,
       provider: 'tavus',
@@ -777,3 +613,4 @@ window.addEventListener('beforeunload', releaseOnUnload);
 // Initial UI.
 setScreen('start');
 setButton();
+void loadSelectors();
