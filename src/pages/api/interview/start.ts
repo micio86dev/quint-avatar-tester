@@ -314,8 +314,10 @@ async function createHeygenContext(
       // create a fresh context each start, so the name carries prompt/template + timestamp.
       name: `Colloquio — p${promptId} — t${templateId}-${Date.now()}`,
       prompt,
-      // No opening_text: the greeting is spoken client-side via session.repeat() once the
-      // media is playing, so the first words aren't clipped during WebRTC ramp-up.
+      // opening_text is REQUIRED by LiveAvatar, but we send it EMPTY so the avatar does not
+      // auto-greet: the greeting is spoken client-side via session.repeat() once the media is
+      // playing, so the first words aren't clipped during WebRTC ramp-up.
+      opening_text: '',
     }),
   });
   const payload = await res.json().catch(() => null);
