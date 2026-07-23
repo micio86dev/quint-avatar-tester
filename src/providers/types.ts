@@ -56,6 +56,9 @@ export interface StartConfig {
   providerSessionId?: string;
   sessionToken?: string; // heygen
   conversationUrl?: string; // tavus
+  // Opening line, spoken by the CLIENT once the media stream is actually playing (instead of
+  // the provider auto-speaking it on connect, which clips the first words during WebRTC ramp-up).
+  greeting?: string;
   [k: string]: unknown;
 }
 

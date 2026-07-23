@@ -571,6 +571,7 @@ async function connectSession(): Promise<void> {
       providerSessionId,
       sessionToken: data.sessionToken,
       conversationUrl: data.conversationUrl,
+      greeting: typeof data.greeting === 'string' ? data.greeting : undefined,
     });
     providerSessionId = result.providerSessionId ?? providerSessionId;
 

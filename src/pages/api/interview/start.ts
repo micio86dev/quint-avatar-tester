@@ -212,7 +212,6 @@ async function startHeygen(req: StartRequest): Promise<Response> {
   // instruction is baked in by composeInterviewPrompt, so there is nothing stable to cache.
   const contextId = await createHeygenContext(
     timezoneContext(req.timezone) + req.systemPrompt,
-    req.greeting,
     req.promptId,
     req.templateId,
   );
@@ -296,13 +295,13 @@ async function startHeygen(req: StartRequest): Promise<Response> {
     provider: 'heygen',
     sessionToken: data.session_token,
     providerSessionId,
+    greeting: req.greeting, // spoken client-side once the stream is playing (see StartConfig)
     ...meta(req),
   });
 }
 
 async function createHeygenContext(
   prompt: string,
-  openingText: string,
   promptId: number,
   templateId: number,
 ): Promise<string> {
@@ -315,7 +314,8 @@ async function createHeygenContext(
       // create a fresh context each start, so the name carries prompt/template + timestamp.
       name: `Colloquio — p${promptId} — t${templateId}-${Date.now()}`,
       prompt,
-      opening_text: openingText,
+      // No opening_text: the greeting is spoken client-side via session.repeat() once the
+      // media is playing, so the first words aren't clipped during WebRTC ramp-up.
     }),
   });
   const payload = await res.json().catch(() => null);
@@ -377,7 +377,8 @@ async function createTavusConversation(req: StartRequest): Promise<Response> {
       // Tavus uses the persona's OWN LLM ("its brain"); the script (with the baked-in
       // end_interview tool instruction from composeInterviewPrompt) is injected as context.
       conversational_context: timezoneContext(req.timezone) + req.systemPrompt,
-      custom_greeting: req.greeting,
+      // No custom_greeting: the client echoes the opening line once the stream is playing,
+      // so the first words aren't clipped during WebRTC ramp-up.
       audio_only: bool(cfg, 'audioOnly') ?? false,
       properties: {
         language: tavusLanguage(str(cfg, 'language')),
@@ -453,6 +454,7 @@ async function startTavus(req: StartRequest): Promise<Response> {
     providerSessionId: conversationId,
     // Surface audio-only so the client can swap the (green, track-less) video for a visualizer.
     audioOnly: bool(req.config, 'audioOnly') ?? false,
+    greeting: req.greeting, // echoed client-side once the stream is playing (see StartConfig)
     ...meta(req),
   });
 }

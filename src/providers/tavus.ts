@@ -34,6 +34,11 @@ export class TavusProvider implements InterviewProvider {
   // lands mid-utterance we defer 'complete' until the replica stops speaking.
   private replicaSpeaking = false;
   private pendingComplete = false;
+  // Opening line echoed once the replica's stream is live (avoids clipped first words that an
+  // auto-spoken custom_greeting suffers during WebRTC ramp-up).
+  private greeting = '';
+  private conversationId?: string;
+  private greetingSent = false;
 
   on(evt: ProviderEvent, cb: Handler): void {
     this.handlers[evt].push(cb);
@@ -47,6 +52,8 @@ export class TavusProvider implements InterviewProvider {
     const url = cfg.conversationUrl;
     if (!url) throw new Error('Tavus: missing conversationUrl');
     this.videoEl = mountEl as HTMLVideoElement;
+    this.greeting = typeof cfg.greeting === 'string' ? cfg.greeting : '';
+    this.conversationId = cfg.providerSessionId;
 
     // videoSource:false = our camera stays OFF; audioSource:true = mic controllable.
     const call = Daily.createCallObject({ audioSource: true, videoSource: false });
@@ -78,6 +85,31 @@ export class TavusProvider implements InterviewProvider {
     this.stream.addTrack(track);
     this.videoEl.srcObject = this.stream;
     void this.videoEl.play?.().catch(() => {});
+    this.maybeGreet();
+  }
+
+  // Echo the opening line once, shortly after the first remote track arrives (the replica is
+  // present and streaming). Tavus "echo" makes the replica speak the text verbatim.
+  private maybeGreet(): void {
+    if (this.greetingSent || !this.greeting || !this.call) return;
+    this.greetingSent = true;
+    const text = this.greeting;
+    const conversationId = this.conversationId;
+    setTimeout(() => {
+      try {
+        this.call?.sendAppMessage(
+          {
+            message_type: 'conversation',
+            event_type: 'conversation.echo',
+            conversation_id: conversationId,
+            properties: { text },
+          },
+          '*',
+        );
+      } catch {
+        /* best-effort — if echo isn't delivered the interview still proceeds */
+      }
+    }, 800);
   }
 
   private onMessage(ev: DailyEventObjectAppMessage): void {

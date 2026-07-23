@@ -29,7 +29,20 @@ export class HeyGenProvider implements InterviewProvider {
   // speaking; the actual 'complete' is emitted on AVATAR_SPEAK_ENDED so the sentence
   // finishes before the question tears down.
   private pendingComplete = false;
+  private greetingSpoken = false;
   private handlers: Record<ProviderEvent, Handler[]> = { transcript: [], state: [], error: [] };
+
+  // Speak the opening line exactly once, verbatim, after the media is live — avoids the
+  // clipped first words that an auto-spoken opening_text suffers during WebRTC ramp-up.
+  private speakGreeting(greeting: string | undefined): void {
+    if (this.greetingSpoken || !greeting) return;
+    this.greetingSpoken = true;
+    try {
+      this.session?.repeat(greeting);
+    } catch {
+      /* session tearing down — nothing we can do */
+    }
+  }
 
   on(evt: ProviderEvent, cb: Handler): void {
     this.handlers[evt].push(cb);
@@ -60,11 +73,14 @@ export class HeyGenProvider implements InterviewProvider {
       if (state === SessionState.CONNECTED) this.emit('state', 'ready');
     });
 
-    // Stream ready → attach video + audio to the <video> element.
+    // Stream ready → attach video + audio to the <video> element, then greet once it is
+    // actually playing (with a fallback timer in case 'playing' has already passed).
     session.on(SessionEvent.SESSION_STREAM_READY, () => {
-      const el = mountEl as HTMLMediaElement;
-      session.attach(el);
-      void (el as HTMLVideoElement).play?.().catch(() => {});
+      const el = mountEl as HTMLVideoElement;
+      session.attach(el as HTMLMediaElement);
+      void el.play?.().catch(() => {});
+      el.addEventListener('playing', () => this.speakGreeting(cfg.greeting), { once: true });
+      setTimeout(() => this.speakGreeting(cfg.greeting), 1500);
       this.emit('state', 'ready');
     });
 
