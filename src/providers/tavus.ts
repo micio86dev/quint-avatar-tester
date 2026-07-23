@@ -34,6 +34,7 @@ export class TavusProvider implements InterviewProvider {
   // lands mid-utterance we defer 'complete' until the replica stops speaking.
   private replicaSpeaking = false;
   private pendingComplete = false;
+  private completeTimer: ReturnType<typeof setTimeout> | null = null;
   // Opening line echoed once the replica's stream is live (avoids clipped first words that an
   // auto-spoken custom_greeting suffers during WebRTC ramp-up).
   private greeting = '';
@@ -122,11 +123,18 @@ export class TavusProvider implements InterviewProvider {
         const text = msg.properties?.speech?.trim();
         if (text) {
           this.emit('transcript', { role, text, ts: Date.now(), seq: msg.seq } satisfies TranscriptEntry);
-          // Avatar spoke the closing sentinel → interview is over. Defer until it finishes
-          // speaking so the final line isn't cut off; fire now if it's already idle.
+          // Avatar spoke the closing sentinel → interview is over. NEVER end immediately: the
+          // utterance transcript can arrive before/at the start of the spoken closing line, so
+          // completing now would cut off the goodbye and eject the user. Always wait for the
+          // replica to STOP speaking; a fallback timer covers the case where the utterance is
+          // the last event and no stopped_speaking follows.
           if (role === 'avatar' && matchesEndPhrase(text)) {
-            if (this.replicaSpeaking) this.pendingComplete = true;
-            else this.emit('state', 'complete');
+            this.pendingComplete = true;
+            if (this.completeTimer == null) {
+              this.completeTimer = setTimeout(() => {
+                if (this.pendingComplete && !this.replicaSpeaking) this.finishComplete();
+              }, 8000);
+            }
           }
         }
         break;
@@ -138,10 +146,7 @@ export class TavusProvider implements InterviewProvider {
       case 'conversation.replica.stopped_speaking':
         this.replicaSpeaking = false;
         this.emit('state', 'ready');
-        if (this.pendingComplete) {
-          this.pendingComplete = false;
-          this.emit('state', 'complete');
-        }
+        if (this.pendingComplete) this.finishComplete(); // goodbye finished → end now
         break;
       case 'conversation.user.started_speaking':
         this.emit('state', 'listening');
@@ -157,12 +162,28 @@ export class TavusProvider implements InterviewProvider {
     }
   }
 
+  // Emit 'complete' once, clearing the fallback timer. Guarded so stopped_speaking and the
+  // timer can't double-fire it.
+  private finishComplete(): void {
+    if (!this.pendingComplete) return;
+    this.pendingComplete = false;
+    if (this.completeTimer != null) {
+      clearTimeout(this.completeTimer);
+      this.completeTimer = null;
+    }
+    this.emit('state', 'complete');
+  }
+
   async toggleMic(): Promise<void> {
     if (!this.call) return;
     this.call.setLocalAudio(!this.call.localAudio());
   }
 
   async stop(): Promise<void> {
+    if (this.completeTimer != null) {
+      clearTimeout(this.completeTimer);
+      this.completeTimer = null;
+    }
     const call = this.call;
     this.call = null;
     if (call) {
