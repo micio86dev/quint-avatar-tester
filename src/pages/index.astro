@@ -105,6 +105,13 @@ const locale: Locale = resolveLocale(
           <!-- Audio is attached to this same element, so it must NOT be muted. -->
           <video id="avatar-video" autoplay playsinline></video>
 
+          <!-- Connecting overlay: replaces the bare black frame while the stream ramps up, so
+               the wait reads as "getting ready" rather than "stuck / broken". -->
+          <div id="stage-loading" class="stage-loading" hidden>
+            <div class="stage-spinner" aria-hidden="true"></div>
+            <p class="stage-loading-text">{t(locale, 'interview.preparing')}</p>
+          </div>
+
           <!-- Audio-only visualizer: replaces the (track-less, green) video when a Tavus
                template runs audio_only. The bars animate while the avatar is speaking. -->
           <div id="avatar-viz" class="avatar-viz" hidden aria-hidden="true">
@@ -432,6 +439,40 @@ const locale: Locale = resolveLocale(
          The <video> keeps playing audio even while display:none. */
       #avatar-video.audio-only {
         display: none;
+      }
+
+      .stage-loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        background: #000;
+        border-radius: 20px;
+      }
+      .stage-loading[hidden] {
+        display: none;
+      }
+      .stage-spinner {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: 3px solid rgba(180, 131, 230, 0.25);
+        border-top-color: var(--brand);
+        animation: stage-spin 0.9s linear infinite;
+      }
+      .stage-loading-text {
+        margin: 0;
+        color: #cbb4e6;
+        font-size: 0.95rem;
+      }
+      @keyframes stage-spin {
+        to { transform: rotate(360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .stage-spinner { animation: none; }
       }
 
       .avatar-viz {

@@ -75,10 +75,18 @@ export function composeInterviewPrompt(params: InterviewPromptParams): {
 
   lines.push(
     '',
-    'Conduci queste domande in sequenza in UNA SOLA conversazione continua, una alla volta, ' +
-      'senza fermarti tra una e l’altra. Passa alla domanda successiva solo dopo aver ' +
-      'raccolto l’obiettivo di quella corrente. Non ripetere l’elenco delle domande e ' +
-      'non chiedere se il partecipante è pronto: attendi le sue risposte.',
+    'Conduci queste domande in sequenza in UNA SOLA conversazione continua, una alla volta. ' +
+      'Collega le domande con brevi transizioni naturali, agganciandoti a ciò che il ' +
+      'partecipante ha appena detto, così non sembra la lettura di una lista. Passa alla ' +
+      'domanda successiva SOLO quando il partecipante ha chiaramente finito di rispondere: ' +
+      'non interromperlo e non anticipare mentre sta ancora parlando.',
+    '',
+    'Adatta le domande di approfondimento a ciò che il partecipante ha appena raccontato: ' +
+      'evita formule ripetute e non riproporre più volte la stessa domanda con parole simili. ' +
+      'Se il partecipante ti chiede di ripetere o di chiarire una domanda, fallo volentieri e ' +
+      'riformulala con parole diverse e più semplici: non rifiutarti mai di ripetere o spiegare.',
+    '',
+    'Parla con calma e in modo naturale, con brevi pause tra le frasi; non affrettare il ritmo.',
     '',
     `Hai a disposizione circa ${mmss(maxSeconds)} in totale: gestisci il tempo, vai al punto e non divagare.`,
   );

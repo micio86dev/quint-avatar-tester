@@ -39,6 +39,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const app = document.getElementById('app') as HTMLElement;
 const videoEl = document.getElementById('avatar-video') as HTMLVideoElement;
 const avatarViz = document.getElementById('avatar-viz') as HTMLElement;
+const stageLoading = document.getElementById('stage-loading') as HTMLElement;
 const button = document.getElementById('talk-button') as HTMLButtonElement;
 const statusEl = document.getElementById('status') as HTMLElement;
 const captionEl = document.getElementById('caption') as HTMLElement;
@@ -550,6 +551,7 @@ async function connectSession(): Promise<void> {
       const kind = String(s);
       setAvatarSpeaking(kind === 'speaking');
       avatarViz.classList.toggle('speaking', kind === 'speaking'); // drives the audio-only bars
+      if (kind === 'speaking' || kind === 'listening') hideStageLoading(); // stream is live now
       if (kind === 'stopped') {
         if (!ending) void onProviderStopped();
         return;
@@ -669,6 +671,12 @@ function applyAudioOnly(on: boolean): void {
   if (!on) avatarViz.classList.remove('speaking');
 }
 
+// Drop the "getting ready" overlay once the avatar is actually live (video playing, or the
+// first speaking/listening state for audio-only where the <video> never renders).
+function hideStageLoading(): void {
+  stageLoading.hidden = true;
+}
+
 function enterInterviewScreen(): void {
   // Stop any previous proximity check before starting a fresh one.
   cameraCheckCleanup?.();
@@ -678,6 +686,8 @@ function enterInterviewScreen(): void {
   captionEl.textContent = '';
   resetTimerDisplay();
   applyAudioOnly(false); // default to video; the start response flips this on if audio_only
+  stageLoading.hidden = false; // show the "getting ready" overlay until the stream is live
+  videoEl.addEventListener('playing', hideStageLoading, { once: true });
   setStatus('connecting');
   setScreen('interview');
 
@@ -705,6 +715,7 @@ function goHome(): void {
   stopPreview(); // safety net if we bail out of the preview screen
   captionEl.textContent = '';
   applyAudioOnly(false);
+  stageLoading.hidden = true;
   resetTimerDisplay();
   phase = 'idle';
   ending = true;
