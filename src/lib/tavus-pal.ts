@@ -33,6 +33,20 @@ async function palError(res: Response): Promise<string> {
   return String(payload?.message ?? payload?.error ?? `HTTP ${res.status}`);
 }
 
+// A hung Tavus request must not hang the whole template-save HTTP request (Railway then 502s
+// with "Application failed to respond"). Bound every PAL call so a slow/unreachable Tavus
+// degrades to a warning — the template still saves.
+const PAL_TIMEOUT_MS = 10_000;
+async function palFetch(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PAL_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Create or update the Tavus PAL for a template's Tavus config. Returns a discriminated
 // result; on 'created' the caller writes result.palId back into the config before persisting.
 // Never throws for provider/network failures — returns a 'warning' so the save still succeeds.
@@ -51,7 +65,7 @@ export async function syncTavusPal(
     if (palId) {
       const ops = buildPalPatchOps(config);
       if (ops.length === 0) return { status: 'unchanged', palId };
-      const res = await fetch(`${PALS_URL}/${palId}`, {
+      const res = await palFetch(`${PALS_URL}/${palId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-api-key': TAVUS_API_KEY },
         body: JSON.stringify(ops),
@@ -72,7 +86,7 @@ export async function syncTavusPal(
         message: 'Cannot create a Tavus PAL without a Face ID (replica).',
       };
     }
-    const res = await fetch(PALS_URL, {
+    const res = await palFetch(PALS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': TAVUS_API_KEY },
       body: JSON.stringify({
@@ -93,6 +107,10 @@ export async function syncTavusPal(
     }
     return { status: 'created', palId: newId };
   } catch (err) {
+    // AbortError = our own timeout fired; report it as a timeout, not a raw abort message.
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { status: 'warning', message: `Tavus PAL sync timed out after ${PAL_TIMEOUT_MS / 1000}s.` };
+    }
     return {
       status: 'warning',
       message: `Tavus PAL sync error: ${err instanceof Error ? err.message : String(err)}`,
