@@ -58,6 +58,10 @@ const previewMeterFill = document.getElementById('preview-meter-fill') as HTMLEl
 const previewError = document.getElementById('preview-error') as HTMLElement;
 const btnJoin = document.getElementById('btn-join') as HTMLButtonElement;
 const btnPreviewCancel = document.getElementById('btn-preview-cancel') as HTMLButtonElement;
+const checkCam = document.getElementById('check-cam') as HTMLElement;
+const checkCamStatus = document.getElementById('check-cam-status') as HTMLElement;
+const checkMic = document.getElementById('check-mic') as HTMLElement;
+const checkMicStatus = document.getElementById('check-mic-status') as HTMLElement;
 // Interview top bar
 const timerEl = document.getElementById('timer') as HTMLElement;
 // Done screen
@@ -398,35 +402,77 @@ async function startSession(): Promise<void> {
   await openPreview();
 }
 
-// ── Device preview (mic + webcam check) ───────────────────────────────────────────
-let previewStream: MediaStream | null = null;
+// ── Device preview (mic + webcam check gate) ──────────────────────────────────────
+// Two INDEPENDENT device grants so each check reports its own status, and Join stays
+// disabled until BOTH actually work: webcam renders a frame, and the mic captures real sound.
+let previewVideoStream: MediaStream | null = null;
+let previewAudioStream: MediaStream | null = null;
 let previewMeterRaf: number | null = null;
 let previewAudioCtx: AudioContext | null = null;
+let camOk = false;
+let micOk = false;
+const MIC_TEST_LEVEL = 0.06; // peak the mic must reach at least once to count as working
+
+function setCheck(row: HTMLElement, status: HTMLElement, state: 'pending' | 'ok' | 'fail', statusKey: string): void {
+  row.dataset.state = state;
+  status.textContent = t(locale, statusKey);
+}
+function refreshJoin(): void {
+  btnJoin.disabled = !(camOk && micOk);
+}
+function showBlockedIfNeeded(): void {
+  previewError.textContent =
+    checkCam.dataset.state === 'fail' || checkMic.dataset.state === 'fail'
+      ? t(locale, 'interview.preview.blocked')
+      : '';
+}
 
 async function openPreview(): Promise<void> {
   previewError.textContent = '';
+  camOk = false;
+  micOk = false;
   btnJoin.disabled = true;
+  setCheck(checkCam, checkCamStatus, 'pending', 'interview.preview.check.testing');
+  setCheck(checkMic, checkMicStatus, 'pending', 'interview.preview.check.speak');
+  previewMeterFill.style.width = '0%';
   setScreen('preview');
+
+  // Webcam: granted → mark ok once a real frame is decoded (videoWidth > 0).
   try {
-    previewStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480 },
-      audio: true,
-    });
+    previewVideoStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    previewVideo.srcObject = previewVideoStream;
+    previewVideo.muted = true;
+    void previewVideo.play().catch(() => {});
+    const markCam = (): void => {
+      if (camOk || previewVideo.videoWidth === 0) return;
+      camOk = true;
+      setCheck(checkCam, checkCamStatus, 'ok', 'interview.preview.check.ok');
+      refreshJoin();
+    };
+    previewVideo.addEventListener('playing', markCam, { once: true });
+    setTimeout(markCam, 900); // fallback if 'playing' already fired
   } catch {
-    previewError.textContent = t(locale, 'interview.error.devices_denied');
-    return;
+    setCheck(checkCam, checkCamStatus, 'fail', 'interview.preview.check.denied');
   }
-  previewVideo.srcObject = previewStream;
-  previewVideo.muted = true;
-  void previewVideo.play().catch(() => {});
-  startPreviewMeter(previewStream);
-  btnJoin.disabled = false;
+
+  // Mic: granted → the meter marks it ok when it captures sound above MIC_TEST_LEVEL.
+  try {
+    previewAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    startPreviewMeter(previewAudioStream);
+  } catch {
+    setCheck(checkMic, checkMicStatus, 'fail', 'interview.preview.check.denied');
+  }
+
+  showBlockedIfNeeded();
 }
 
-// Live mic level bar off the preview stream — WebAudio peak of the time-domain signal.
+// Live mic level bar; also flips the mic check to ok the first time it hears real sound.
 function startPreviewMeter(stream: MediaStream): void {
   const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AC || stream.getAudioTracks().length === 0) return;
+  if (!AC || stream.getAudioTracks().length === 0) {
+    setCheck(checkMic, checkMicStatus, 'fail', 'interview.preview.check.denied');
+    return;
+  }
   previewAudioCtx = new AC();
   const analyser = previewAudioCtx.createAnalyser();
   analyser.fftSize = 512;
@@ -434,15 +480,20 @@ function startPreviewMeter(stream: MediaStream): void {
   const buf = new Uint8Array(analyser.frequencyBinCount);
   const tick = (): void => {
     // stopPreview() nulls the stream + closes the context; bail so we never read a closed one.
-    if (!previewStream || !previewAudioCtx) return;
+    if (!previewAudioStream || !previewAudioCtx) return;
     analyser.getByteTimeDomainData(buf);
     let peak = 0;
     for (let i = 0; i < buf.length; i++) {
       const v = Math.abs(buf[i] - 128) / 128;
       if (v > peak) peak = v;
     }
-    // Scale up a bit so normal speech fills a good chunk of the bar; clamp to 100%.
     previewMeterFill.style.width = Math.min(100, Math.round(peak * 180)) + '%';
+    if (!micOk && peak > MIC_TEST_LEVEL) {
+      micOk = true;
+      setCheck(checkMic, checkMicStatus, 'ok', 'interview.preview.check.ok');
+      showBlockedIfNeeded();
+      refreshJoin();
+    }
     previewMeterRaf = requestAnimationFrame(tick);
   };
   tick();
@@ -457,10 +508,9 @@ function stopPreview(): void {
     void previewAudioCtx.close().catch(() => {});
     previewAudioCtx = null;
   }
-  if (previewStream) {
-    previewStream.getTracks().forEach((tr) => tr.stop());
-    previewStream = null;
-  }
+  for (const s of [previewVideoStream, previewAudioStream]) s?.getTracks().forEach((tr) => tr.stop());
+  previewVideoStream = null;
+  previewAudioStream = null;
   previewVideo.srcObject = null;
   previewMeterFill.style.width = '0%';
 }

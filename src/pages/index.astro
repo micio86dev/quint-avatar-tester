@@ -73,7 +73,7 @@ const locale: Locale = resolveLocale(
         <a href="/admin" class="admin-link">{t(locale, 'interview.admin_link')}</a>
       </section>
 
-      <!-- ── DEVICE PREVIEW (mic + webcam check) ───────────────────────────────── -->
+      <!-- ── DEVICE PREVIEW (mic + webcam check gate) ──────────────────────────── -->
       <section class="screen panel" id="screen-preview">
         <h1 class="brand">{t(locale, 'interview.preview.title')}</h1>
         <p class="preview-hint">{t(locale, 'interview.preview.hint')}</p>
@@ -82,9 +82,39 @@ const locale: Locale = resolveLocale(
           <video id="preview-video" autoplay playsinline muted></video>
         </div>
 
-        <div class="preview-mic">
-          <span class="preview-mic-label">{t(locale, 'interview.preview.mic')}</span>
-          <div class="preview-meter"><div id="preview-meter-fill" class="preview-meter-fill"></div></div>
+        <!-- Two independent checks; Join stays disabled until BOTH pass. -->
+        <div class="preview-checks">
+          <div class="preview-check" id="check-cam" data-state="pending">
+            <span class="preview-check-mark" aria-hidden="true"></span>
+            <span class="preview-check-label">{t(locale, 'interview.preview.check.cam')}</span>
+            <span class="preview-check-status" id="check-cam-status">{t(locale, 'interview.preview.check.testing')}</span>
+          </div>
+          <div class="preview-check" id="check-mic" data-state="pending">
+            <span class="preview-check-mark" aria-hidden="true"></span>
+            <span class="preview-check-label">{t(locale, 'interview.preview.check.mic')}</span>
+            <div class="preview-meter"><div id="preview-meter-fill" class="preview-meter-fill"></div></div>
+            <span class="preview-check-status" id="check-mic-status">{t(locale, 'interview.preview.check.speak')}</span>
+          </div>
+        </div>
+
+        <!-- Do / Don't guidance, aligned with the proctoring signals. -->
+        <div class="preview-rules">
+          <div class="preview-rules-col preview-rules-do">
+            <h3>{t(locale, 'interview.preview.do.title')}</h3>
+            <ul>
+              <li>{t(locale, 'interview.preview.do.look')}</li>
+              <li>{t(locale, 'interview.preview.do.light')}</li>
+              <li>{t(locale, 'interview.preview.do.alone')}</li>
+            </ul>
+          </div>
+          <div class="preview-rules-col preview-rules-dont">
+            <h3>{t(locale, 'interview.preview.dont.title')}</h3>
+            <ul>
+              <li>{t(locale, 'interview.preview.dont.fullscreen')}</li>
+              <li>{t(locale, 'interview.preview.dont.tab')}</li>
+              <li>{t(locale, 'interview.preview.dont.phone')}</li>
+            </ul>
+          </div>
         </div>
 
         <div class="preview-actions">
@@ -360,16 +390,98 @@ const locale: Locale = resolveLocale(
         /* Mirror the self-view so it reads like a mirror. */
         transform: scaleX(-1);
       }
-      .preview-mic {
+      .preview-checks {
         display: flex;
-        align-items: center;
-        gap: 12px;
+        flex-direction: column;
+        gap: 10px;
         width: min(90vw, 480px);
       }
-      .preview-mic-label {
+      .preview-check {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: #17181f;
+        border: 1px solid #24262f;
         font-size: 0.9rem;
-        color: #cbb4e6;
+        color: #e8eaed;
+      }
+      .preview-check-mark {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: 2px solid #3a3c46;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .preview-check[data-state='ok'] {
+        border-color: rgba(52, 199, 129, 0.5);
+      }
+      .preview-check[data-state='ok'] .preview-check-mark {
+        border-color: #34c781;
+        background: #34c781;
+        color: #06231a;
+      }
+      .preview-check[data-state='ok'] .preview-check-mark::after {
+        content: '✓';
+      }
+      .preview-check[data-state='fail'] {
+        border-color: rgba(248, 113, 113, 0.5);
+      }
+      .preview-check[data-state='fail'] .preview-check-mark {
+        border-color: #f87171;
+        color: #f87171;
+      }
+      .preview-check[data-state='fail'] .preview-check-mark::after {
+        content: '✕';
+      }
+      .preview-check-label {
+        font-weight: 600;
         white-space: nowrap;
+      }
+      .preview-check-status {
+        margin-left: auto;
+        font-size: 0.8rem;
+        color: #9aa0aa;
+        text-align: right;
+      }
+      .preview-check[data-state='fail'] .preview-check-status {
+        color: #f87171;
+      }
+      .preview-rules {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        width: min(90vw, 480px);
+        text-align: left;
+      }
+      .preview-rules-col {
+        flex: 1;
+        min-width: 200px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #17181f;
+        border: 1px solid #24262f;
+      }
+      .preview-rules-col h3 {
+        margin: 0 0 8px;
+        font-size: 0.85rem;
+        letter-spacing: 0.02em;
+      }
+      .preview-rules-do h3 { color: #34c781; }
+      .preview-rules-dont h3 { color: #f87171; }
+      .preview-rules-col ul {
+        margin: 0;
+        padding-left: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 0.82rem;
+        color: #cbd0d8;
       }
       .preview-meter {
         flex: 1;
