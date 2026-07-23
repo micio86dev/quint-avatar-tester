@@ -1,22 +1,14 @@
 import type { APIRoute } from 'astro';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { snapshotFilePath } from '../../../lib/snapshots';
 
 export const prerender = false;
 
-const SNAPSHOTS_DIR = process.env.SNAPSHOTS_PATH
-  ? resolve(process.env.SNAPSHOTS_PATH)
-  : resolve(process.cwd(), 'data', 'snapshots');
-
 export const GET: APIRoute = ({ params }) => {
-  const rawPath = params.path ?? '';
-  if (!rawPath || rawPath.includes('..') || !/^[\w\-./]+$/.test(rawPath)) {
-    return new Response('Forbidden', { status: 403 });
-  }
-  const filePath = resolve(SNAPSHOTS_DIR, rawPath);
-  if (!filePath.startsWith(SNAPSHOTS_DIR + '/')) {
-    return new Response('Forbidden', { status: 403 });
-  }
+  // snapshotFilePath validates + resolves the stored relative path (e.g. snapshots/12/x.jpg)
+  // to a file under SNAPSHOTS_ROOT, guarding traversal and the legacy "snapshots/" prefix.
+  const filePath = snapshotFilePath(params.path ?? '');
+  if (!filePath) return new Response('Forbidden', { status: 403 });
   try {
     const data = readFileSync(filePath);
     return new Response(data, {

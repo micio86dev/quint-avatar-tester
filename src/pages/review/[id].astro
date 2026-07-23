@@ -129,16 +129,16 @@ function eventDetail(type: string, metaJson: string | null): string {
         {snapshots.length > 0 && (
           <section class="card mb-7 p-5">
             <h2 class="mb-3 text-base font-semibold">{t(locale, 'review.snapshots.title', { n: snapshots.length })}</h2>
-            <!-- Horizontal gallery: thumbnails keep the section short vertically; each tile
+            <!-- Responsive grid: fills N columns per row (no horizontal scroll); each tile
                  carries an event tag (or "timed") and the capture time. -->
-            <div class="flex gap-3 overflow-x-auto pb-2">
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
               {snapshots.map((s) => (
-                <figure class="group relative w-36 shrink-0">
+                <figure class="group relative">
                   <img
                     src={`/api/snapshot/${s.path}`}
                     alt={s.trigger ? INTEGRITY_LABELS[s.trigger as IntegrityType] : t(locale, 'review.snapshots.timed')}
                     loading="lazy"
-                    class="h-24 w-36 rounded-md border border-border object-cover"
+                    class="h-24 w-full rounded-md border border-border object-cover"
                   />
                   <figcaption class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 rounded-b-md bg-black/65 px-1.5 py-1 text-[10px] leading-tight text-white">
                     <span class={`truncate font-medium ${s.trigger ? 'text-danger-soft' : ''}`}>

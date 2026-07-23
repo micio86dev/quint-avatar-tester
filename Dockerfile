@@ -19,6 +19,9 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 # DATABASE_PATH must point at a mounted Railway volume so the SQLite file persists
 # across restarts/deploys, e.g. DATABASE_PATH=/data/interviews.db (volume at /data).
+# Webcam snapshots default to <DATABASE_PATH dir>/snapshots (e.g. /data/snapshots), so the
+# same volume keeps them too — otherwise every redeploy wipes the images. SNAPSHOTS_PATH
+# overrides the location explicitly if needed.
 
 EXPOSE 4321
 

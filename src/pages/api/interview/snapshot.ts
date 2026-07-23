@@ -2,12 +2,9 @@ import type { APIRoute } from 'astro';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { insertSnapshot } from '../../../lib/db';
+import { SNAPSHOTS_ROOT, snapshotRelPath } from '../../../lib/snapshots';
 
 export const prerender = false;
-
-const SNAPSHOTS_DIR = process.env.SNAPSHOTS_PATH
-  ? resolve(process.env.SNAPSHOTS_PATH)
-  : resolve(process.cwd(), 'data', 'snapshots');
 
 export const POST: APIRoute = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as
@@ -25,9 +22,9 @@ export const POST: APIRoute = async ({ request }) => {
 
   // Include trigger slug in filename so event-triggered snapshots are identifiable on disk.
   const safeName = ts.replace(/[:.]/g, '-') + (trigger ? `_${trigger}` : '') + '.jpg';
-  const dir = resolve(SNAPSHOTS_DIR, String(sessionId));
+  const dir = resolve(SNAPSHOTS_ROOT, String(sessionId));
   const filePath = resolve(dir, safeName);
-  const relativePath = `snapshots/${sessionId}/${safeName}`;
+  const relativePath = snapshotRelPath(sessionId, safeName);
 
   try {
     mkdirSync(dir, { recursive: true });
