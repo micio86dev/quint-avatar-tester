@@ -55,6 +55,11 @@
     outline: 2px solid var(--color-accent-ring);
     outline-offset: 2px;
   }
+  /* Pointer cursor on every actionable control — buttons/CTAs, the language switch,
+     checkboxes and radios. Disabled controls opt out (component styles set not-allowed). */
+  :where(button, [role="button"], [type="checkbox"], [type="radio"]):not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 /* Shared component vocabulary — one look for buttons, inputs, cards across every page.
@@ -73,6 +78,10 @@
   }
   .btn-danger {
     @apply text-danger hover:bg-danger-soft;
+  }
+  /* Solid destructive variant — used for the primary action of a confirm dialog. */
+  .btn-danger-solid {
+    @apply bg-danger text-white hover:opacity-90;
   }
   .btn-sm {
     @apply px-2.5 py-1.5 text-xs;

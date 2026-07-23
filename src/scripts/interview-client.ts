@@ -63,6 +63,38 @@ const meterCreditsEl = document.getElementById('meter-credits') as HTMLElement;
 const toastEl = document.getElementById('toast') as HTMLElement;
 const toastMsgEl = document.getElementById('toast-msg') as HTMLElement;
 
+// ── Remembered picks ────────────────────────────────────────────────────────────────
+// Persist the operator's last provider / prompt / template in cookies so a return visit
+// starts pre-filled. Prompt/template restore only if the stored id is still a live option.
+const PICK_COOKIE = { provider: 'last_provider', prompt: 'last_prompt', template: 'last_template' };
+function readCookie(name: string): string | null {
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function writeCookie(name: string, value: string): void {
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
+}
+function savePicks(): void {
+  writeCookie(PICK_COOKIE.provider, selectedProvider());
+  writeCookie(PICK_COOKIE.prompt, promptSelect.value);
+  writeCookie(PICK_COOKIE.template, templateSelect.value);
+}
+function restorePicks(): void {
+  const p = readCookie(PICK_COOKIE.provider);
+  if (p === 'heygen' || p === 'tavus') {
+    const radio = providerRadios.find((r) => r.value === p);
+    if (radio) radio.checked = true;
+  }
+  const promptId = readCookie(PICK_COOKIE.prompt);
+  if (promptId && Array.from(promptSelect.options).some((o) => o.value === promptId)) {
+    promptSelect.value = promptId;
+  }
+  const templateId = readCookie(PICK_COOKIE.template);
+  if (templateId && Array.from(templateSelect.options).some((o) => o.value === templateId)) {
+    templateSelect.value = templateId;
+  }
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────────
 let provider: InterviewProvider | null = null;
 let phase: Phase = 'idle';
@@ -194,6 +226,7 @@ async function loadSelectors(): Promise<void> {
   templateSelect.disabled = false;
   selectorsReady = true;
   startError.textContent = '';
+  restorePicks();
   refreshStartEnabled();
 }
 
@@ -591,6 +624,10 @@ btnRestart.addEventListener('click', goHome);
 consentEl.addEventListener('change', refreshStartEnabled);
 promptSelect.addEventListener('change', refreshStartEnabled);
 templateSelect.addEventListener('change', refreshStartEnabled);
+// Remember the last provider / prompt / template picks across visits.
+providerRadios.forEach((r) => r.addEventListener('change', savePicks));
+promptSelect.addEventListener('change', savePicks);
+templateSelect.addEventListener('change', savePicks);
 
 setViolationCallback(showToast);
 

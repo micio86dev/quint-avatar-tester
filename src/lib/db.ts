@@ -571,3 +571,47 @@ export function setTemplateQuestions(templateId: number, orderedQuestionIds: num
   });
   tx(orderedQuestionIds);
 }
+
+// ── One-click duplication ─────────────────────────────────────────────────────────
+// Each helper deep-copies an entity into a fresh row (new id, " (copy)" suffix on the
+// display name) and returns the new id, or null when the source id does not exist.
+export function duplicatePrompt(id: number): number | null {
+  const row = getPrompt(id);
+  if (!row) return null;
+  return createPrompt({
+    title: `${row.title} (copy)`,
+    body: row.body,
+    greeting: row.greeting,
+    language: row.language,
+    notes: row.notes,
+  });
+}
+
+export function duplicateQuestion(id: number): number | null {
+  const row = getQuestion(id);
+  if (!row) return null;
+  return createQuestion({
+    name: `${row.name} (copy)`,
+    text: row.text,
+    objective: row.objective,
+    enabled: row.enabled === 1,
+  });
+}
+
+export function duplicateTemplate(id: number): number | null {
+  const row = getTemplate(id);
+  if (!row) return null;
+  // Clone the stored config JSON strings verbatim (createTemplate passes strings
+  // through), so no provider round-trip / Tavus PAL sync runs on a plain copy.
+  const newId = createTemplate({
+    name: `${row.name} (copy)`,
+    description: row.description,
+    enabled: row.enabled === 1,
+    heygenConfig: row.heygen_config,
+    tavusConfig: row.tavus_config,
+  });
+  // Carry over the ordered question membership so the copy is a faithful recipe.
+  const memberIds = getTemplateQuestions(id).map((q) => q.id);
+  if (memberIds.length) setTemplateQuestions(newId, memberIds);
+  return newId;
+}

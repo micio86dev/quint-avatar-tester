@@ -155,15 +155,19 @@ export function buildPalLayers(config: Config): Record<string, unknown> {
   return (root.layers as Record<string, unknown>) ?? {};
 }
 
-// Build RFC-6902 JSON Patch operations to update an existing Tavus PAL from the config's
-// persona knobs. Blank fields are skipped (left unchanged on the PAL).
+// Build the RFC-6902 JSON Patch to update an existing Tavus PAL from the config's persona
+// knobs. We replace the WHOLE `layers` object in one `add` op, rebuilt from the config
+// (the single source of truth). Rationale:
+//   - Per-leaf `replace` fails when a nested node does not yet exist on the PAL — e.g.
+//     `layers/llm/extra_body/temperature` on a PAL created without a temperature — because
+//     RFC-6902 `replace` requires the target to already exist ("can't replace a
+//     non-existent object 'temperature'").
+//   - `add` on `/layers` (whose parent, the document root, always exists) creates or
+//     replaces it wholesale, so any knob depth works, and cleared fields drop out.
 export function buildPalPatchOps(
   config: Config,
-): Array<{ op: 'replace'; path: string; value: unknown }> {
-  const ops: Array<{ op: 'replace'; path: string; value: unknown }> = [];
-  for (const f of PAL_FIELDS) {
-    const v = config?.[f.key];
-    if (!isBlank(v)) ops.push({ op: 'replace', path: '/' + f.palPath, value: v });
-  }
-  return ops;
+): Array<{ op: 'add'; path: string; value: unknown }> {
+  const layers = buildPalLayers(config);
+  if (Object.keys(layers).length === 0) return [];
+  return [{ op: 'add', path: '/layers', value: layers }];
 }

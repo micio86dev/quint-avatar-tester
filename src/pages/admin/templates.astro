@@ -77,12 +77,12 @@ const locale: Locale = resolveLocale(
           <button type="button" id="btn-add-q" class="btn btn-ghost btn-sm shrink-0">
             {t(locale, 'admin.templates.mem.add')}
           </button>
+          <button type="button" id="btn-new-q" class="btn btn-primary btn-sm shrink-0">
+            {t(locale, 'admin.templates.mem.new_question')}
+          </button>
         </div>
         <p class="hint mb-2">{t(locale, 'admin.templates.mem.drag_hint')}</p>
         <ol id="mem-list" class="mb-3 flex flex-col gap-1.5"></ol>
-        <button type="button" id="btn-save-questions" class="btn btn-ghost btn-sm">
-          {t(locale, 'admin.templates.mem.save')}
-        </button>
       </div>
     </fieldset>
 
@@ -111,6 +111,7 @@ const locale: Locale = resolveLocale(
   <script>
     import { t, type Locale } from '../../lib/i18n';
     import { makeSortable } from '../../scripts/sortable';
+    import { confirmDialog, openModal } from '../../scripts/modal';
     import {
       HEYGEN_FIELDS,
       TAVUS_FIELDS,
@@ -137,7 +138,13 @@ const locale: Locale = resolveLocale(
     }
 
     async function api(url: string, opts?: RequestInit) {
-      const res = await fetch(url, opts);
+      // Always tag requests as JSON. Same-origin this is a no-op, but it exempts our
+      // bodyless mutations (DELETE, duplicate POST) from Astro's checkOrigin CSRF guard,
+      // which otherwise 403s them behind a reverse proxy where Origin ≠ internal host.
+      const res = await fetch(url, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', ...(opts?.headers as Record<string, string> | undefined) },
+      });
       let data: any = null;
       try {
         data = await res.json();
@@ -366,11 +373,15 @@ const locale: Locale = resolveLocale(
           edit.className = 'btn btn-ghost btn-sm';
           edit.textContent = t(locale, 'action.edit');
           edit.onclick = () => openEdit(tpl.id);
+          const dup = document.createElement('button');
+          dup.className = 'btn btn-ghost btn-sm ml-1.5';
+          dup.textContent = t(locale, 'action.duplicate');
+          dup.onclick = () => duplicate(tpl.id);
           const del = document.createElement('button');
           del.className = 'btn btn-danger btn-sm ml-1.5';
           del.textContent = t(locale, 'action.delete');
           del.onclick = () => remove(tpl.id, tpl.name);
-          act.append(edit, del);
+          act.append(edit, dup, del);
 
           tr.append(name, st, act);
           rows.appendChild(tr);
@@ -447,6 +458,13 @@ const locale: Locale = resolveLocale(
         if (!meta) label.classList.add('text-danger');
         left.append(handle, label);
 
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'btn btn-ghost btn-sm px-2 shrink-0';
+        editBtn.textContent = '✎';
+        editBtn.title = t(locale, 'action.edit');
+        editBtn.onclick = () => editQuestion(id);
+
         const rm = document.createElement('button');
         rm.type = 'button';
         rm.className = 'btn btn-danger btn-sm px-2 shrink-0';
@@ -457,7 +475,11 @@ const locale: Locale = resolveLocale(
           renderMembership();
         };
 
-        li.append(left, rm);
+        const actions = document.createElement('span');
+        actions.className = 'flex shrink-0 items-center gap-1.5';
+        actions.append(editBtn, rm);
+
+        li.append(left, actions);
         list.appendChild(li);
       });
     }
@@ -479,24 +501,173 @@ const locale: Locale = resolveLocale(
       },
     });
 
-    async function saveQuestions() {
-      const id = ($('f-id') as HTMLInputElement).value;
-      if (!id) return;
+    // ── Inline question CRUD (create / edit / delete without leaving the template) ──
+    // Opens a styled modal to author a question. `existing` is a full question row for
+    // edit, or null to create. On save it refreshes the enabled-question set; a newly
+    // created enabled question drops straight into this template's ordered list.
+    function openQuestionModal(existing: any | null) {
+      const isEdit = !!existing;
+      const handle = openModal({
+        title: isEdit
+          ? t(locale, 'admin.questions.editor.edit', { id: existing.id })
+          : t(locale, 'admin.questions.editor.new'),
+        render: (body) => {
+          const field = (labelKey: string, control: HTMLElement, required = false) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'mb-4';
+            const lab = document.createElement('label');
+            lab.className = 'label';
+            lab.textContent = t(locale, labelKey) + (required ? ' *' : '');
+            wrap.append(lab, control);
+            return wrap;
+          };
+
+          const name = document.createElement('input');
+          name.type = 'text';
+          name.className = 'input';
+          name.value = existing?.name ?? '';
+
+          const text = document.createElement('textarea');
+          text.className = 'input';
+          text.rows = 4;
+          text.value = existing?.text ?? '';
+
+          const objective = document.createElement('textarea');
+          objective.className = 'input min-h-16';
+          objective.rows = 2;
+          objective.value = existing?.objective ?? '';
+
+          const enabledWrap = document.createElement('label');
+          enabledWrap.className = 'mb-4 flex items-center gap-2 text-sm font-medium text-fg';
+          const enabled = document.createElement('input');
+          enabled.type = 'checkbox';
+          enabled.className = 'size-4 accent-[var(--color-accent)]';
+          enabled.checked = isEdit ? existing.enabled === 1 || existing.enabled === true : true;
+          const enabledLab = document.createElement('span');
+          enabledLab.textContent = t(locale, 'admin.questions.field.enabled');
+          enabledWrap.append(enabled, enabledLab);
+
+          const err = document.createElement('p');
+          err.className = 'mb-3 hidden text-sm text-danger';
+
+          const actions = document.createElement('div');
+          actions.className = 'mt-2 flex items-center gap-3';
+
+          const save = document.createElement('button');
+          save.type = 'button';
+          save.className = 'btn btn-primary';
+          save.textContent = t(locale, 'action.save');
+          save.onclick = async () => {
+            const payload: any = {
+              name: name.value.trim(),
+              text: text.value,
+              objective: objective.value.trim() || null,
+              enabled: enabled.checked,
+            };
+            if (!payload.name || !payload.text.trim()) {
+              err.textContent =
+                t(locale, 'admin.questions.field.name') + ' / ' + t(locale, 'admin.questions.field.text') + ' *';
+              err.classList.remove('hidden');
+              return;
+            }
+            try {
+              let qid: number;
+              if (isEdit) {
+                await api(QAPI + '/' + existing.id, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload),
+                });
+                qid = existing.id;
+              } else {
+                const created = await api(QAPI, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload),
+                });
+                qid = created.id;
+              }
+              handle.close();
+              await loadEnabledQuestions();
+              // Keep an edited member addressable even if it is now disabled.
+              if (!enabledQuestions.has(qid) && memberIds.includes(qid)) {
+                enabledQuestions.set(qid, { id: qid, name: payload.name });
+              }
+              // A freshly created, enabled question joins this template right away.
+              if (!isEdit && payload.enabled && !memberIds.includes(qid)) memberIds.push(qid);
+              renderMembership();
+              flash(t(locale, isEdit ? 'admin.questions.msg.saved' : 'admin.questions.msg.created'));
+            } catch (e: any) {
+              err.textContent = e.message;
+              err.classList.remove('hidden');
+            }
+          };
+
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.className = 'btn btn-ghost';
+          cancel.textContent = t(locale, 'action.cancel');
+          cancel.onclick = () => handle.close();
+
+          actions.append(save, cancel);
+
+          // Edit mode also deletes. An enabled question is guarded by the API (409),
+          // whose message is surfaced verbatim; disable it first to delete.
+          if (isEdit) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'btn btn-danger ml-auto';
+            del.textContent = t(locale, 'action.delete');
+            del.onclick = async () => {
+              handle.close();
+              const ok = await confirmDialog({
+                title: t(locale, 'action.confirm_title'),
+                message: t(locale, 'admin.questions.confirm_delete', { name: existing.name }),
+                confirmLabel: t(locale, 'action.delete'),
+                cancelLabel: t(locale, 'action.cancel'),
+                tone: 'danger',
+              });
+              if (!ok) return;
+              try {
+                await api(QAPI + '/' + existing.id, { method: 'DELETE' });
+                const at = memberIds.indexOf(existing.id);
+                if (at !== -1) memberIds.splice(at, 1);
+                await loadEnabledQuestions();
+                renderMembership();
+                flash(t(locale, 'admin.questions.msg.deleted'));
+              } catch (e: any) {
+                flash(e.message, false);
+              }
+            };
+            actions.append(del);
+          }
+
+          body.append(
+            field('admin.questions.field.name', name, true),
+            field('admin.questions.field.text', text, true),
+            field('admin.questions.field.objective', objective),
+            enabledWrap,
+            err,
+            actions,
+          );
+        },
+      });
+    }
+
+    // Fetch the full question row, then open the modal in edit mode.
+    async function editQuestion(id: number) {
       try {
-        await api(API + '/' + id + '/questions', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ questionIds: memberIds }),
-        });
-        flash(t(locale, 'admin.templates.msg.order_saved'));
+        const q = await api(QAPI + '/' + id);
+        openQuestionModal(q);
       } catch (e: any) {
         flash(e.message, false);
       }
     }
-    ($('btn-save-questions') as HTMLButtonElement).onclick = saveQuestions;
+
+    ($('btn-new-q') as HTMLButtonElement).onclick = () => openQuestionModal(null);
 
     // ── Open / edit ──────────────────────────────────────────────────────────────
-    function openNew() {
+    async function openNew() {
       clearFlash();
       $('editor-title').textContent = t(locale, 'admin.templates.editor.new');
       ($('f-id') as HTMLInputElement).value = '';
@@ -507,10 +678,13 @@ const locale: Locale = resolveLocale(
       buildFields($('tavus-fields'), TAVUS_FIELDS);
       fillFields($('heygen-fields'), null);
       fillFields($('tavus-fields'), null);
-      // Membership editing needs a saved template id.
+      // Questions can be picked/created right away — membership is persisted together with
+      // the template on Save, so there is no "save the template first" round-trip.
       memberIds = [];
-      $('mem-area').hidden = true;
-      $('mem-hint').hidden = false;
+      await loadEnabledQuestions();
+      renderMembership();
+      $('mem-area').hidden = false;
+      $('mem-hint').hidden = true;
       $('editor').hidden = false;
       ($('f-name') as HTMLInputElement).focus();
     }
@@ -586,6 +760,12 @@ const locale: Locale = resolveLocale(
           // Reflect any freshly-created palId back into the form, so a second save PATCHes
           // the same PAL instead of creating a duplicate.
           if (data && data.tavus_config) fillFields($('tavus-fields'), data.tavus_config);
+          // Persist the ordered question membership in the same save.
+          await api(API + '/' + id + '/questions', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ questionIds: memberIds }),
+          });
           savedFlash('admin.templates.msg.saved', data && data.palWarning);
           loadList();
         } else {
@@ -594,9 +774,17 @@ const locale: Locale = resolveLocale(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
+          // Persist the questions selected/created while building the template — one op.
+          if (created && created.id && memberIds.length) {
+            await api(API + '/' + created.id + '/questions', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ questionIds: memberIds }),
+            });
+          }
           savedFlash('admin.templates.msg.created', created && created.palWarning);
           loadList();
-          // Reopen in edit mode so the operator can now manage membership.
+          // Reopen in edit mode so the new id + any created Tavus palId are reflected.
           if (created && created.id) openEdit(created.id);
         }
       } catch (e: any) {
@@ -605,8 +793,26 @@ const locale: Locale = resolveLocale(
     }
     ($('btn-save') as HTMLButtonElement).onclick = saveTemplate;
 
+    async function duplicate(id: number) {
+      clearFlash();
+      try {
+        await api(API + '/' + id + '/duplicate', { method: 'POST' });
+        flash(t(locale, 'action.duplicated'));
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
     async function remove(id: number, name: string) {
-      if (!confirm(t(locale, 'admin.templates.confirm_delete', { name }))) return;
+      const ok = await confirmDialog({
+        title: t(locale, 'action.confirm_title'),
+        message: t(locale, 'admin.templates.confirm_delete', { name }),
+        confirmLabel: t(locale, 'action.delete'),
+        cancelLabel: t(locale, 'action.cancel'),
+        tone: 'danger',
+      });
+      if (!ok) return;
       try {
         await api(API + '/' + id, { method: 'DELETE' });
         flash(t(locale, 'admin.templates.msg.deleted'));

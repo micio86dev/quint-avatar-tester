@@ -80,6 +80,7 @@ const locale: Locale = resolveLocale(
 
   <script>
     import { t, type Locale } from '../../lib/i18n';
+    import { confirmDialog } from '../../scripts/modal';
 
     const locale = (document.documentElement.lang || 'it') as Locale;
     const API = '/api/admin/prompts';
@@ -98,7 +99,13 @@ const locale: Locale = resolveLocale(
     }
 
     async function api(url: string, opts?: RequestInit) {
-      const res = await fetch(url, opts);
+      // Always tag requests as JSON. Same-origin this is a no-op, but it exempts our
+      // bodyless mutations (DELETE, duplicate POST) from Astro's checkOrigin CSRF guard,
+      // which otherwise 403s them behind a reverse proxy where Origin ≠ internal host.
+      const res = await fetch(url, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', ...(opts?.headers as Record<string, string> | undefined) },
+      });
       let data: any = null;
       try {
         data = await res.json();
@@ -151,11 +158,15 @@ const locale: Locale = resolveLocale(
           edit.className = 'btn btn-ghost btn-sm';
           edit.textContent = t(locale, 'action.edit');
           edit.onclick = () => openEdit(p.id);
+          const dup = document.createElement('button');
+          dup.className = 'btn btn-ghost btn-sm ml-1.5';
+          dup.textContent = t(locale, 'action.duplicate');
+          dup.onclick = () => duplicate(p.id);
           const del = document.createElement('button');
           del.className = 'btn btn-danger btn-sm ml-1.5';
           del.textContent = t(locale, 'action.delete');
           del.onclick = () => remove(p.id, p.title);
-          act.append(edit, del);
+          act.append(edit, dup, del);
 
           tr.append(title, lang, upd, act);
           rows.appendChild(tr);
@@ -193,8 +204,26 @@ const locale: Locale = resolveLocale(
       }
     }
 
+    async function duplicate(id: number) {
+      clearFlash();
+      try {
+        await api(API + '/' + id + '/duplicate', { method: 'POST' });
+        flash(t(locale, 'action.duplicated'));
+        loadList();
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
     async function remove(id: number, title: string) {
-      if (!confirm(t(locale, 'admin.prompts.confirm_delete', { title }))) return;
+      const ok = await confirmDialog({
+        title: t(locale, 'action.confirm_title'),
+        message: t(locale, 'admin.prompts.confirm_delete', { title }),
+        confirmLabel: t(locale, 'action.delete'),
+        cancelLabel: t(locale, 'action.cancel'),
+        tone: 'danger',
+      });
+      if (!ok) return;
       try {
         await api(API + '/' + id, { method: 'DELETE' });
         flash(t(locale, 'admin.prompts.msg.deleted'));
