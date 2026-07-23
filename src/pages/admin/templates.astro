@@ -78,6 +78,7 @@ const locale: Locale = resolveLocale(
             {t(locale, 'admin.templates.mem.add')}
           </button>
         </div>
+        <p class="hint mb-2">{t(locale, 'admin.templates.mem.drag_hint')}</p>
         <ol id="mem-list" class="mb-3 flex flex-col gap-1.5"></ol>
         <button type="button" id="btn-save-questions" class="btn btn-ghost btn-sm">
           {t(locale, 'admin.templates.mem.save')}
@@ -109,6 +110,14 @@ const locale: Locale = resolveLocale(
 
   <script>
     import { t, type Locale } from '../../lib/i18n';
+    import { makeSortable } from '../../scripts/sortable';
+    import {
+      HEYGEN_FIELDS,
+      TAVUS_FIELDS,
+      validateProviderConfig,
+      type FieldSpec,
+      type Provider,
+    } from '../../lib/provider-config';
 
     const locale = (document.documentElement.lang || 'it') as Locale;
     const API = '/api/admin/templates';
@@ -139,72 +148,22 @@ const locale: Locale = resolveLocale(
       return data;
     }
 
-    // ── Adaptive provider-config field definitions ──────────────────────────────
-    // Each entry: { key, label, type, options?, min?, max?, step?, hint? }.
-    // These keys ARE the object keys serialized into heygenConfig / tavusConfig.
-    type FieldDef = {
-      key: string;
-      label: string;
-      type: 'text' | 'number' | 'select' | 'checkbox';
-      options?: string[];
-      min?: number;
-      max?: number;
-      step?: number;
-      hint?: string;
-    };
-
-    const HEYGEN_FIELDS: FieldDef[] = [
-      { key: 'avatarId', label: 'Avatar ID', type: 'text' },
-      { key: 'language', label: 'Language', type: 'text', hint: 'e.g. it / en' },
-      { key: 'interactivityType', label: 'Interactivity', type: 'select', options: ['CONVERSATIONAL', 'PUSH_TO_TALK'] },
-      { key: 'maxSessionDurationSec', label: 'Max session (sec)', type: 'number', hint: 'Essential plan ~1200s / 20min' },
-      { key: 'videoQuality', label: 'Video quality', type: 'select', options: ['very_high', 'high', 'medium', 'low'] },
-      { key: 'videoEncoding', label: 'Video encoding', type: 'select', options: ['H264', 'VP8'] },
-      { key: 'voiceId', label: 'Voice ID', type: 'text' },
-      { key: 'voiceProvider', label: 'Voice provider', type: 'select', options: ['elevenLabs', 'fish'] },
-      { key: 'voiceSpeed', label: 'Voice speed', type: 'number', min: 0.8, max: 1.2, step: 0.01 },
-      { key: 'voiceStability', label: 'Voice stability', type: 'number', min: 0, max: 1, step: 0.01 },
-      { key: 'voiceSimilarityBoost', label: 'Voice similarity boost', type: 'number', min: 0, max: 1, step: 0.01 },
-      { key: 'voiceStyle', label: 'Voice style', type: 'number', min: 0, max: 1, step: 0.01 },
-      { key: 'voiceUseSpeakerBoost', label: 'Use speaker boost', type: 'checkbox' },
-    ];
-
-    const TAVUS_FIELDS: FieldDef[] = [
-      { key: 'palId', label: 'Persona (pal) ID', type: 'text' },
-      { key: 'faceId', label: 'Face ID', type: 'text' },
-      { key: 'language', label: 'Language', type: 'text', hint: 'e.g. english / multilingual' },
-      { key: 'audioOnly', label: 'Audio only', type: 'checkbox' },
-      { key: 'maxCallDurationSec', label: 'Max call (sec)', type: 'number', hint: 'default 3600' },
-      { key: 'participantAbsentTimeoutSec', label: 'Absent timeout (sec)', type: 'number', hint: 'default 300' },
-      { key: 'enableRecording', label: 'Enable recording', type: 'checkbox' },
-      { key: 'enableClosedCaptions', label: 'Closed captions', type: 'checkbox' },
-      { key: 'llmModel', label: 'LLM model', type: 'select', options: ['tavus-gemma-4', 'tavus-gemma-4-thinking', 'tavus-gpt-5.6-sol', 'tavus-gpt-5.6-terra', 'tavus-gemini-2.5-flash'] },
-      { key: 'llmTemperature', label: 'LLM temperature', type: 'number', min: 0, max: 2, step: 0.01 },
-      { key: 'llmSpeculativeInference', label: 'Speculative inference', type: 'checkbox' },
-      { key: 'ttsEngine', label: 'TTS engine', type: 'select', options: ['tavus-auto', 'cartesia', 'elevenlabs', 'azure'] },
-      { key: 'ttsExternalVoiceId', label: 'TTS external voice ID', type: 'text' },
-      { key: 'turnTakingPatience', label: 'Turn-taking patience', type: 'select', options: ['low', 'medium', 'high'] },
-      { key: 'interruptibility', label: 'Interruptibility', type: 'select', options: ['low', 'medium', 'high'] },
-      { key: 'voiceIsolation', label: 'Voice isolation', type: 'select', options: ['near', 'off'] },
-      { key: 'idleEngagement', label: 'Idle engagement', type: 'select', options: ['off', 'patient', 'eager'] },
-    ];
+    // Provider-config field definitions live in the shared spec (src/lib/provider-config.ts),
+    // the single source of truth for labels, constraints, validation, and the Tavus PAL
+    // mapping. Here we only resolve the i18n label/hint keys and render the controls.
 
     // Build the form controls for a config section. Empty option lets selects be "unset".
-    function buildFields(container: HTMLElement, fields: FieldDef[]) {
+    // Each field stacks: the control row, a help hint (its own line — hints are sentences),
+    // and a hidden per-field error slot that validateConfigs() fills in.
+    function buildFields(container: HTMLElement, fields: readonly FieldSpec[]) {
       container.innerHTML = '';
       for (const f of fields) {
         const wrap = document.createElement('div');
-        wrap.className = f.type === 'checkbox' ? 'flex items-center gap-2' : 'flex flex-col gap-1.5';
+        wrap.className = 'flex flex-col gap-1';
 
         const cap = document.createElement('label');
         cap.className = 'text-sm font-medium text-fg';
-        cap.textContent = f.label;
-        if (f.hint) {
-          const h = document.createElement('span');
-          h.className = 'ml-1 text-xs font-normal text-faint';
-          h.textContent = f.hint;
-          cap.appendChild(h);
-        }
+        cap.textContent = t(locale, f.labelKey);
 
         let input: HTMLInputElement | HTMLSelectElement;
         if (f.type === 'select') {
@@ -239,12 +198,29 @@ const locale: Locale = resolveLocale(
         input.dataset.key = f.key;
         input.dataset.type = f.type;
 
+        // Control row: checkbox puts the box before the label; others stack label → input.
+        const row = document.createElement('div');
         if (f.type === 'checkbox') {
-          // Checkbox layout: control then label on one row.
-          wrap.append(input, cap);
+          row.className = 'flex items-center gap-2';
+          row.append(input, cap);
         } else {
-          wrap.append(cap, input);
+          row.className = 'flex flex-col gap-1.5';
+          row.append(cap, input);
         }
+        wrap.appendChild(row);
+
+        if (f.hintKey) {
+          const h = document.createElement('p');
+          h.className = 'text-xs leading-snug text-faint';
+          h.textContent = t(locale, f.hintKey);
+          wrap.appendChild(h);
+        }
+
+        const err = document.createElement('p');
+        err.className = 'hidden text-xs font-medium';
+        err.dataset.fieldError = f.key;
+        wrap.appendChild(err);
+
         container.appendChild(wrap);
       }
     }
@@ -287,6 +263,65 @@ const locale: Locale = resolveLocale(
       return Object.keys(out).length ? out : null;
     }
 
+    // ── Config validation (shared spec) ──────────────────────────────────────────
+    // Turn a validation code into a localized, non-technical message. Range errors
+    // include the allowed interval so the operator knows the bounds.
+    function errMessage(provider: Provider, key: string, code: string): string {
+      const spec = (provider === 'heygen' ? HEYGEN_FIELDS : TAVUS_FIELDS).find((s) => s.key === key);
+      if (code === 'range' && spec && (spec.min !== undefined || spec.max !== undefined)) {
+        return t(locale, 'admin.cfg.err.range', { min: String(spec.min ?? '−∞'), max: String(spec.max ?? '∞') });
+      }
+      return t(locale, 'admin.cfg.err.' + code);
+    }
+
+    function clearFieldErrors(container: HTMLElement) {
+      container.querySelectorAll<HTMLElement>('[data-field-error]').forEach((el) => {
+        el.classList.add('hidden');
+        el.classList.remove('text-danger', 'text-warning');
+        el.textContent = '';
+      });
+    }
+
+    // Validate both provider configs from the live form. Paints per-field notes and returns
+    // counts. `hard` = real errors (type/range/enum) shown in danger and BLOCK the save;
+    // `required` = missing recommended IDs shown in warning — allowed, they fall back to .env.
+    function validateConfigs(): { hard: number; required: number } {
+      let hard = 0;
+      let required = 0;
+      for (const provider of ['heygen', 'tavus'] as Provider[]) {
+        const container = $(provider + '-fields');
+        clearFieldErrors(container);
+        const errors = validateProviderConfig(provider, collectFields(container));
+        for (const e of errors) {
+          const slot = container.querySelector<HTMLElement>('[data-field-error="' + e.key + '"]');
+          if (slot) {
+            slot.textContent = errMessage(provider, e.key, e.code);
+            slot.classList.remove('hidden');
+            slot.classList.add(e.code === 'required' ? 'text-warning' : 'text-danger');
+          }
+          if (e.code === 'required') required++;
+          else hard++;
+        }
+      }
+      return { hard, required };
+    }
+
+    // Classify a template's stored provider configs for the list badge: hard errors
+    // (type/range/enum) → 'errors'; only missing required fields → 'incomplete'; else 'ok'.
+    function configStatus(tpl: any): { label: string; cls: string } {
+      const errors = [
+        ...validateProviderConfig('heygen', tpl.heygen_config ?? null),
+        ...validateProviderConfig('tavus', tpl.tavus_config ?? null),
+      ];
+      if (errors.some((e) => e.code !== 'required')) {
+        return { label: t(locale, 'admin.templates.cfg.errors'), cls: 'badge bg-danger-soft text-danger' };
+      }
+      if (errors.length) {
+        return { label: t(locale, 'admin.templates.cfg.incomplete'), cls: 'badge bg-warning/15 text-warning' };
+      }
+      return { label: t(locale, 'admin.templates.cfg.ok'), cls: 'badge bg-success-soft text-success' };
+    }
+
     // ── List ────────────────────────────────────────────────────────────────────
     async function loadList() {
       const rows = $('rows');
@@ -313,10 +348,17 @@ const locale: Locale = resolveLocale(
 
           const st = document.createElement('td');
           st.className = 'px-5 py-3';
+          const badgeRow = document.createElement('span');
+          badgeRow.className = 'inline-flex flex-wrap items-center gap-1.5';
           const badge = document.createElement('span');
           badge.className = 'badge ' + (on ? 'badge-on' : 'badge-off');
           badge.textContent = on ? t(locale, 'state.enabled') : t(locale, 'state.disabled');
-          st.appendChild(badge);
+          const cfg = configStatus(tpl);
+          const cfgBadge = document.createElement('span');
+          cfgBadge.className = cfg.cls;
+          cfgBadge.textContent = cfg.label;
+          badgeRow.append(badge, cfgBadge);
+          st.appendChild(badgeRow);
 
           const act = document.createElement('td');
           act.className = 'px-5 py-3 text-right whitespace-nowrap';
@@ -384,48 +426,40 @@ const locale: Locale = resolveLocale(
         list.appendChild(li);
         return;
       }
-      memberIds.forEach((id, i) => {
+      memberIds.forEach((id) => {
         const meta = enabledQuestions.get(id);
         const li = document.createElement('li');
-        li.className =
-          'flex items-center justify-between gap-3 rounded-md border border-border bg-panel px-3 py-2';
+        li.className = 'sortable-item list-none';
+        li.draggable = true;
+        li.dataset.sortableItem = '';
+        li.dataset.sortableKey = String(id);
+
+        const left = document.createElement('span');
+        left.className = 'flex min-w-0 items-center gap-2.5';
+        const handle = document.createElement('span');
+        handle.className = 'drag-handle';
+        handle.textContent = '⠿';
+        handle.setAttribute('aria-hidden', 'true');
         const label = document.createElement('span');
-        label.className = 'text-sm';
+        label.className = 'truncate text-sm';
         // A member id may no longer be enabled (e.g. disabled after selection) — flag it.
         label.textContent = meta ? meta.name : t(locale, 'admin.templates.mem.not_enabled', { id });
         if (!meta) label.classList.add('text-danger');
-        const ctrl = document.createElement('span');
-        ctrl.className = 'flex gap-1 whitespace-nowrap';
-        const up = document.createElement('button');
-        up.className = 'btn btn-ghost btn-sm px-2';
-        up.textContent = '↑';
-        up.disabled = i === 0;
-        up.onclick = () => move(i, -1);
-        const down = document.createElement('button');
-        down.className = 'btn btn-ghost btn-sm px-2';
-        down.textContent = '↓';
-        down.disabled = i === memberIds.length - 1;
-        down.onclick = () => move(i, 1);
+        left.append(handle, label);
+
         const rm = document.createElement('button');
-        rm.className = 'btn btn-danger btn-sm px-2';
+        rm.type = 'button';
+        rm.className = 'btn btn-danger btn-sm px-2 shrink-0';
         rm.textContent = '✕';
         rm.onclick = () => {
-          memberIds.splice(i, 1);
+          const at = memberIds.indexOf(id);
+          if (at !== -1) memberIds.splice(at, 1);
           renderMembership();
         };
-        ctrl.append(up, down, rm);
-        li.append(label, ctrl);
+
+        li.append(left, rm);
         list.appendChild(li);
       });
-    }
-
-    function move(i: number, dir: number) {
-      const j = i + dir;
-      if (j < 0 || j >= memberIds.length) return;
-      const tmp = memberIds[i];
-      memberIds[i] = memberIds[j];
-      memberIds[j] = tmp;
-      renderMembership();
     }
 
     ($('btn-add-q') as HTMLButtonElement).onclick = () => {
@@ -435,6 +469,15 @@ const locale: Locale = resolveLocale(
       if (!memberIds.includes(id)) memberIds.push(id);
       renderMembership();
     };
+
+    // Drag & drop reordering — the single reusable mechanism. Attached once; the
+    // list re-renders its children freely (event delegation survives that).
+    makeSortable($('mem-list'), {
+      onReorder: (keys) => {
+        memberIds = keys.map(Number);
+        renderMembership();
+      },
+    });
 
     async function saveQuestions() {
       const id = ($('f-id') as HTMLInputElement).value;
@@ -514,6 +557,13 @@ const locale: Locale = resolveLocale(
         flash(t(locale, 'admin.templates.field.name') + ' *', false);
         return;
       }
+      // Block only on hard config errors (type/range/enum); missing recommended IDs are
+      // allowed (they fall back to .env at runtime). Per-field notes are painted here.
+      const { hard } = validateConfigs();
+      if (hard > 0) {
+        flash(t(locale, 'admin.cfg.err.summary', { count: String(hard) }), false);
+        return;
+      }
       const payload = {
         name,
         description: ($('f-description') as HTMLTextAreaElement).value.trim() || null,
@@ -521,14 +571,22 @@ const locale: Locale = resolveLocale(
         heygenConfig: collectFields($('heygen-fields')),
         tavusConfig: collectFields($('tavus-fields')),
       };
+      // A PAL warning is non-fatal (the template still saved) but needs attention.
+      const savedFlash = (msgKey: string, palWarning?: string) => {
+        if (palWarning) flash(t(locale, msgKey) + ' ⚠ ' + palWarning, false);
+        else flash(t(locale, msgKey));
+      };
       try {
         if (id) {
-          await api(API + '/' + id, {
+          const data = await api(API + '/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
-          flash(t(locale, 'admin.templates.msg.saved'));
+          // Reflect any freshly-created palId back into the form, so a second save PATCHes
+          // the same PAL instead of creating a duplicate.
+          if (data && data.tavus_config) fillFields($('tavus-fields'), data.tavus_config);
+          savedFlash('admin.templates.msg.saved', data && data.palWarning);
           loadList();
         } else {
           const created = await api(API, {
@@ -536,7 +594,7 @@ const locale: Locale = resolveLocale(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
-          flash(t(locale, 'admin.templates.msg.created'));
+          savedFlash('admin.templates.msg.created', created && created.palWarning);
           loadList();
           // Reopen in edit mode so the operator can now manage membership.
           if (created && created.id) openEdit(created.id);

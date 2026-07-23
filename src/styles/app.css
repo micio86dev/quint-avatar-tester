@@ -109,4 +109,15 @@
   .badge-off {
     @apply bg-panel text-muted;
   }
+
+  /* Drag & drop reordering (see src/scripts/sortable.ts). */
+  .sortable-item {
+    @apply flex items-center justify-between gap-3 rounded-md border border-border bg-panel px-3 py-2;
+  }
+  .sortable-dragging {
+    @apply opacity-50;
+  }
+  .drag-handle {
+    @apply cursor-grab select-none text-faint transition-colors hover:text-fg active:cursor-grabbing;
+  }
 }

@@ -49,6 +49,62 @@ const DEFAULT_FOLLOW_UP_QUESTIONS = [
 const DEFAULT_CLOSING =
   'Perfetto, abbiamo raccolto tutto quello che ci serve. Grazie per il tuo tempo!';
 
+// Read a trimmed env var, or '' when unset. The seeder runs as a plain Node process
+// (npm run db:seed / Docker --env-file), so process.env carries the .env values.
+function env(key: string): string {
+  const v = process.env[key];
+  return typeof v === 'string' && v.trim() ? v.trim() : '';
+}
+
+// Drop blank string values so we never store an empty required ID (the field then shows
+// empty in admin and the validator flags it as "to fill" — honest rather than fake-filled).
+function pruneBlank(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string' && v.trim() === '') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+// A fully-populated EXAMPLE config so operators see every knob filled in. IDs come from
+// .env when present; everything else uses sensible defaults. Keys match the shared spec
+// in provider-config.ts (option values are literal provider/API strings).
+const DEFAULT_HEYGEN_CONFIG = pruneBlank({
+  avatarId: env('LIVEAVATAR_AVATAR_ID'),
+  voiceId: env('LIVEAVATAR_VOICE_ID'),
+  language: env('LIVEAVATAR_LANGUAGE') || 'it',
+  interactivityType: 'CONVERSATIONAL',
+  maxSessionDurationSec: 1200,
+  videoQuality: 'high',
+  videoEncoding: 'H264',
+  voiceProvider: 'elevenLabs',
+  voiceSpeed: 1,
+  voiceStability: 0.5,
+  voiceSimilarityBoost: 0.75,
+  voiceStyle: 0,
+  voiceUseSpeakerBoost: true,
+});
+
+const DEFAULT_TAVUS_CONFIG = pruneBlank({
+  faceId: env('TAVUS_REPLICA_ID'),
+  palId: env('TAVUS_PERSONA_ID'),
+  language: 'it',
+  audioOnly: false,
+  maxCallDurationSec: 1800,
+  participantAbsentTimeoutSec: 300,
+  enableRecording: false,
+  enableClosedCaptions: true,
+  llmModel: 'tavus-gpt-5.6-sol',
+  llmTemperature: 0.5,
+  llmSpeculativeInference: true,
+  ttsEngine: 'tavus-auto',
+  turnTakingPatience: 'medium',
+  interruptibility: 'medium',
+  voiceIsolation: 'near',
+  idleEngagement: 'patient',
+});
+
 // The ordered default questions (name / text / objective), copied verbatim.
 const DEFAULT_QUESTIONS: { name: string; text: string; objective: string }[] = [
   {
@@ -118,12 +174,14 @@ export function seed(conn?: Database.Database): SeedResult {
     }),
   );
 
-  // 3. Default template that runs those questions in order. Provider config is left null
-  // (omitted) — the operator fills it in later via the CRUD, otherwise .env is used.
+  // 3. Default template that runs those questions in order, pre-filled with a complete
+  // EXAMPLE provider config (IDs from .env when present) so operators see every knob set.
   const templateId = createTemplate({
     name: DEFAULT_TITLE,
     description: null,
     enabled: true,
+    heygenConfig: DEFAULT_HEYGEN_CONFIG,
+    tavusConfig: DEFAULT_TAVUS_CONFIG,
   });
   setTemplateQuestions(templateId, questionIds);
 

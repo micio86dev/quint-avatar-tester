@@ -81,6 +81,14 @@ function bool(cfg: ProviderConfig, key: string): boolean | undefined {
   return typeof v === 'boolean' ? v : undefined;
 }
 
+// Map the admin's it/en language selection to the wording Tavus expects. Any other stored
+// value (e.g. a legacy 'italian'/'multilingual') is passed through unchanged.
+function tavusLanguage(v: string | undefined): string {
+  if (v === 'it') return 'italian';
+  if (v === 'en') return 'english';
+  return v && v.trim() ? v : 'italian';
+}
+
 // Read a string config field but ONLY accept a value from the documented allowlist.
 // Anything else (unknown/absent/wrong type) returns undefined so the caller falls back
 // to its default — an arbitrary string never reaches the provider.
@@ -353,7 +361,7 @@ async function createTavusConversation(req: StartRequest): Promise<Response> {
       custom_greeting: req.greeting,
       audio_only: bool(cfg, 'audioOnly') ?? false,
       properties: {
-        language: str(cfg, 'language') ?? 'italian',
+        language: tavusLanguage(str(cfg, 'language')),
         enable_recording: bool(cfg, 'enableRecording') ?? false,
         enable_closed_captions: bool(cfg, 'enableClosedCaptions') ?? false,
         // Server-side hard cap so a session can't overrun the resolved budget
