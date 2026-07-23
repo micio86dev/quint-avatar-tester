@@ -7,7 +7,8 @@ function main(): void {
   const result = seed(); // seed() opens the app DB, which runs migrations first
   console.log(
     `Seed complete at ${getDbPath()}: ${result.promptsInserted} prompt(s), ` +
-      `${result.questionsInserted} question(s), ${result.templatesInserted} template(s).`,
+      `${result.questionsInserted} question(s), ${result.templatesInserted} template(s)` +
+      `${result.configBackfilled ? ', config backfilled onto existing template' : ''}.`,
   );
 }
 

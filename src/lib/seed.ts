@@ -9,14 +9,18 @@ import {
   createPrompt,
   createQuestion,
   createTemplate,
+  listTemplates,
   openDb,
   setTemplateQuestions,
+  updateTemplate,
 } from './db';
 
 export interface SeedResult {
   promptsInserted: number;
   questionsInserted: number;
   templatesInserted: number;
+  /** True when an existing default template had its empty config backfilled. */
+  configBackfilled: boolean;
 }
 
 // Default persona metadata (Italian seeded content).
@@ -146,14 +150,48 @@ function composeBody(): string {
 // wipes the file, so no duplicates in practice.
 // Accepts an optional connection so callers/tests can reuse an existing DB; otherwise
 // opens the app DB (which runs migrations).
+// A stored provider-config JSON string counts as "empty" when absent or an empty object.
+function isEmptyConfig(value: string | null): boolean {
+  return !value || value === 'null' || value.replace(/\s/g, '') === '{}';
+}
+
+// Backfill the example provider config onto a PRE-EXISTING default template that was seeded
+// before configs existed (e.g. a deployment whose DB volume predates this feature — the
+// normal seed is skipped there because prompts already exist). Runs every boot but only
+// fills when BOTH configs are still empty, so it never clobbers an edited config.
+function backfillDefaultTemplateConfig(): boolean {
+  const templates = listTemplates();
+  const tpl = templates.find((t) => t.name === DEFAULT_TITLE) ?? templates[0];
+  if (!tpl) return false;
+  if (!isEmptyConfig(tpl.heygen_config) || !isEmptyConfig(tpl.tavus_config)) return false;
+
+  updateTemplate(tpl.id, {
+    name: tpl.name,
+    description: tpl.description,
+    enabled: tpl.enabled === 1,
+    heygenConfig: DEFAULT_HEYGEN_CONFIG,
+    tavusConfig: DEFAULT_TAVUS_CONFIG,
+  });
+  return true;
+}
+
 export function seed(conn?: Database.Database): SeedResult {
   // openDb is invoked for its migration side-effect; the CRUD helpers use the app's
   // lazily-cached connection, so passing conn here keeps the surface uniform.
   const db = conn ?? openDb();
   void db;
 
+  // Backfill config onto an existing default template first, so deployments whose DB volume
+  // predates the example config get it without a destructive reset.
+  const configBackfilled = backfillDefaultTemplateConfig();
+
   if (countPrompts() > 0) {
-    return { promptsInserted: 0, questionsInserted: 0, templatesInserted: 0 };
+    return {
+      promptsInserted: 0,
+      questionsInserted: 0,
+      templatesInserted: 0,
+      configBackfilled,
+    };
   }
 
   // 1. Persona prompt (instructions + guidance), no specific questions in the body.
@@ -189,6 +227,7 @@ export function seed(conn?: Database.Database): SeedResult {
     promptsInserted: 1,
     questionsInserted: questionIds.length,
     templatesInserted: 1,
+    configBackfilled,
   };
 }
 
