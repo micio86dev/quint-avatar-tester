@@ -56,7 +56,9 @@ export async function syncTavusPal(
         headers: { 'Content-Type': 'application/json', 'x-api-key': TAVUS_API_KEY },
         body: JSON.stringify(ops),
       });
-      if (!res.ok) {
+      // 304 Not Modified: the PAL already holds these exact layer values, so Tavus made no
+      // change. That's a successful no-op, not a failure — treat it like a clean patch.
+      if (!res.ok && res.status !== 304) {
         return { status: 'warning', message: `Tavus PAL update failed: ${await palError(res)}` };
       }
       return { status: 'unchanged', palId };

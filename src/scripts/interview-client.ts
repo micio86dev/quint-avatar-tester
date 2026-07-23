@@ -14,7 +14,7 @@ import { t, type Locale } from '../lib/i18n';
 const locale = (document.documentElement.lang || 'it') as Locale;
 
 type Phase = 'idle' | 'connecting' | 'live';
-type Screen = 'start' | 'interview' | 'done';
+type Screen = 'start' | 'preview' | 'interview' | 'done';
 type EndedReason = 'completed' | 'timeout' | 'user_stop' | 'error';
 
 interface Rates {
@@ -38,6 +38,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 // ── DOM ─────────────────────────────────────────────────────────────────────────
 const app = document.getElementById('app') as HTMLElement;
 const videoEl = document.getElementById('avatar-video') as HTMLVideoElement;
+const avatarViz = document.getElementById('avatar-viz') as HTMLElement;
 const button = document.getElementById('talk-button') as HTMLButtonElement;
 const statusEl = document.getElementById('status') as HTMLElement;
 const captionEl = document.getElementById('caption') as HTMLElement;
@@ -50,6 +51,12 @@ const promptSelect = document.getElementById('prompt-select') as HTMLSelectEleme
 const templateSelect = document.getElementById('template-select') as HTMLSelectElement;
 const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
 const startError = document.getElementById('start-error') as HTMLElement;
+// Device preview (mic/webcam check before joining)
+const previewVideo = document.getElementById('preview-video') as HTMLVideoElement;
+const previewMeterFill = document.getElementById('preview-meter-fill') as HTMLElement;
+const previewError = document.getElementById('preview-error') as HTMLElement;
+const btnJoin = document.getElementById('btn-join') as HTMLButtonElement;
+const btnPreviewCancel = document.getElementById('btn-preview-cancel') as HTMLButtonElement;
 // Interview top bar
 const timerEl = document.getElementById('timer') as HTMLElement;
 // Done screen
@@ -374,6 +381,8 @@ async function ensureMicPermission(): Promise<void> {
   stream.getTracks().forEach((t) => t.stop());
 }
 
+// Step 1 — validate the picks, then open the device preview so the operator can check the
+// webcam framing and the mic level BEFORE the provider session (and its cost) start.
 async function startSession(): Promise<void> {
   if (phase !== 'idle') return;
   startError.textContent = '';
@@ -384,6 +393,84 @@ async function startSession(): Promise<void> {
     startError.textContent = t(locale, 'interview.error.select_all');
     return;
   }
+  providerName = selectedProvider();
+  await openPreview();
+}
+
+// ── Device preview (mic + webcam check) ───────────────────────────────────────────
+let previewStream: MediaStream | null = null;
+let previewMeterRaf: number | null = null;
+let previewAudioCtx: AudioContext | null = null;
+
+async function openPreview(): Promise<void> {
+  previewError.textContent = '';
+  btnJoin.disabled = true;
+  setScreen('preview');
+  try {
+    previewStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480 },
+      audio: true,
+    });
+  } catch {
+    previewError.textContent = t(locale, 'interview.error.devices_denied');
+    return;
+  }
+  previewVideo.srcObject = previewStream;
+  previewVideo.muted = true;
+  void previewVideo.play().catch(() => {});
+  startPreviewMeter(previewStream);
+  btnJoin.disabled = false;
+}
+
+// Live mic level bar off the preview stream — WebAudio peak of the time-domain signal.
+function startPreviewMeter(stream: MediaStream): void {
+  const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AC || stream.getAudioTracks().length === 0) return;
+  previewAudioCtx = new AC();
+  const analyser = previewAudioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  previewAudioCtx.createMediaStreamSource(stream).connect(analyser);
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  const tick = (): void => {
+    // stopPreview() nulls the stream + closes the context; bail so we never read a closed one.
+    if (!previewStream || !previewAudioCtx) return;
+    analyser.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = Math.abs(buf[i] - 128) / 128;
+      if (v > peak) peak = v;
+    }
+    // Scale up a bit so normal speech fills a good chunk of the bar; clamp to 100%.
+    previewMeterFill.style.width = Math.min(100, Math.round(peak * 180)) + '%';
+    previewMeterRaf = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+// Release the preview devices + meter. The session re-acquires fresh streams on join, so we
+// never hand a preview stream into the proctor/provider (keeps ownership simple).
+function stopPreview(): void {
+  if (previewMeterRaf != null) cancelAnimationFrame(previewMeterRaf);
+  previewMeterRaf = null;
+  if (previewAudioCtx) {
+    void previewAudioCtx.close().catch(() => {});
+    previewAudioCtx = null;
+  }
+  if (previewStream) {
+    previewStream.getTracks().forEach((tr) => tr.stop());
+    previewStream = null;
+  }
+  previewVideo.srcObject = null;
+  previewMeterFill.style.width = '0%';
+}
+
+// Step 2 — the operator confirmed the devices: release the preview and connect for real.
+async function connectSession(): Promise<void> {
+  if (phase !== 'idle') return;
+  stopPreview();
+
+  const promptId = Number(promptSelect.value);
+  const templateId = Number(templateSelect.value);
   providerName = selectedProvider();
 
   // Move to the interview screen and run the pre-session camera warmup.
@@ -447,6 +534,9 @@ async function startSession(): Promise<void> {
 
     sessionId = data.dbSessionId;
     providerSessionId = data.providerSessionId ?? undefined;
+    // Tavus audio_only sends no video track (the element would show a green frame), so show
+    // the visualizer instead. HeyGen and video Tavus keep the <video>.
+    applyAudioOnly(Boolean(data.audioOnly));
 
     provider = makeProvider(providerName);
     ending = false;
@@ -459,6 +549,7 @@ async function startSession(): Promise<void> {
     provider.on('state', (s) => {
       const kind = String(s);
       setAvatarSpeaking(kind === 'speaking');
+      avatarViz.classList.toggle('speaking', kind === 'speaking'); // drives the audio-only bars
       if (kind === 'stopped') {
         if (!ending) void onProviderStopped();
         return;
@@ -569,6 +660,14 @@ async function onProviderError(): Promise<void> {
 }
 
 // ── Screen flow ────────────────────────────────────────────────────────────────
+// Audio-only (Tavus audio_only templates): swap the green, track-less <video> for the
+// animated visualizer. The <video> stays in the DOM (display:none) so its audio keeps playing.
+function applyAudioOnly(on: boolean): void {
+  videoEl.classList.toggle('audio-only', on);
+  avatarViz.hidden = !on;
+  if (!on) avatarViz.classList.remove('speaking');
+}
+
 function enterInterviewScreen(): void {
   // Stop any previous proximity check before starting a fresh one.
   cameraCheckCleanup?.();
@@ -577,6 +676,7 @@ function enterInterviewScreen(): void {
 
   captionEl.textContent = '';
   resetTimerDisplay();
+  applyAudioOnly(false); // default to video; the start response flips this on if audio_only
   setStatus('connecting');
   setScreen('interview');
 
@@ -601,7 +701,9 @@ function goHome(): void {
   cameraCheckCleanup?.();
   cameraCheckCleanup = null;
   cameraOk = null;
+  stopPreview(); // safety net if we bail out of the preview screen
   captionEl.textContent = '';
+  applyAudioOnly(false);
   resetTimerDisplay();
   phase = 'idle';
   ending = true;
@@ -620,6 +722,11 @@ button.addEventListener('click', () => {
   }
 });
 btnStart.addEventListener('click', () => void startSession());
+btnJoin.addEventListener('click', () => void connectSession());
+btnPreviewCancel.addEventListener('click', () => {
+  stopPreview();
+  goHome();
+});
 btnRestart.addEventListener('click', goHome);
 consentEl.addEventListener('change', refreshStartEnabled);
 promptSelect.addEventListener('change', refreshStartEnabled);
@@ -640,6 +747,7 @@ let unloadHandled = false;
 function releaseOnUnload(): void {
   if (unloadHandled) return;
   unloadHandled = true;
+  stopPreview(); // release preview devices if the page closes while on the preview screen
   beaconProctor(); // ship any buffered integrity events before the page goes away
   if (providerName === 'tavus' && sessionId != null && !ending) {
     const payload = JSON.stringify({

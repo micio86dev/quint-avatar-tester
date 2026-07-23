@@ -54,6 +54,7 @@ const locale: Locale = resolveLocale(
       <div class="field">
         <label class="label" for="f-name">{t(locale, 'admin.templates.field.name')} <span class="text-danger">*</span></label>
         <input type="text" id="f-name" class="input" required />
+        <p class="mt-1 hidden text-xs font-medium text-danger" data-error-for="f-name"></p>
       </div>
       <div class="field">
         <label class="label" for="f-description">{t(locale, 'admin.templates.field.description')}</label>
@@ -102,6 +103,7 @@ const locale: Locale = resolveLocale(
       <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-5 gap-y-4" id="tavus-fields"></div>
     </fieldset>
 
+    <p id="form-status" class="mb-3 hidden rounded-md px-4 py-2.5 text-sm" role="alert"></p>
     <div class="flex gap-3">
       <button type="button" id="btn-save" class="btn btn-primary">{t(locale, 'admin.templates.save')}</button>
       <button type="button" id="btn-cancel" class="btn btn-ghost">{t(locale, 'action.cancel')}</button>
@@ -125,7 +127,9 @@ const locale: Locale = resolveLocale(
     const QAPI = '/api/admin/questions';
     const $ = (id: string) => document.getElementById(id) as HTMLElement;
     const statusEl = $('status');
+    const formStatusEl = $('form-status');
 
+    // Top status: list-context feedback (duplicate/delete) shown with the editor closed.
     function flash(msg: string, ok = true) {
       statusEl.hidden = false;
       statusEl.textContent = msg;
@@ -135,6 +139,38 @@ const locale: Locale = resolveLocale(
     }
     function clearFlash() {
       statusEl.hidden = true;
+    }
+
+    // Form status: save/validation feedback shown right next to the Save button. The
+    // template editor stays open after a save, so all its outcomes surface here.
+    function flashForm(msg: string, ok = true) {
+      formStatusEl.hidden = false;
+      formStatusEl.textContent = msg;
+      formStatusEl.className =
+        'mb-3 rounded-md px-4 py-2.5 text-sm ' +
+        (ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger');
+    }
+    function clearForm() {
+      formStatusEl.hidden = true;
+    }
+
+    // Meta name is the only always-required field; provider-config fields carry their own
+    // per-field slots painted by validateConfigs().
+    function setMetaNameError(msg: string) {
+      const slot = document.querySelector<HTMLElement>('[data-error-for="f-name"]');
+      if (slot) {
+        slot.textContent = msg;
+        slot.classList.remove('hidden');
+      }
+      $('f-name')?.setAttribute('aria-invalid', 'true');
+    }
+    function clearMetaNameError() {
+      const slot = document.querySelector<HTMLElement>('[data-error-for="f-name"]');
+      if (slot) {
+        slot.textContent = '';
+        slot.classList.add('hidden');
+      }
+      $('f-name')?.removeAttribute('aria-invalid');
     }
 
     async function api(url: string, opts?: RequestInit) {
@@ -669,6 +705,8 @@ const locale: Locale = resolveLocale(
     // ── Open / edit ──────────────────────────────────────────────────────────────
     async function openNew() {
       clearFlash();
+      clearForm();
+      clearMetaNameError();
       $('editor-title').textContent = t(locale, 'admin.templates.editor.new');
       ($('f-id') as HTMLInputElement).value = '';
       ($('f-name') as HTMLInputElement).value = '';
@@ -691,6 +729,8 @@ const locale: Locale = resolveLocale(
 
     async function openEdit(id: number) {
       clearFlash();
+      clearForm();
+      clearMetaNameError();
       try {
         const tpl = await api(API + '/' + id);
         $('editor-title').textContent = t(locale, 'admin.templates.editor.edit', { id: tpl.id });
@@ -725,17 +765,21 @@ const locale: Locale = resolveLocale(
     }
 
     async function saveTemplate() {
+      clearForm();
+      clearMetaNameError();
       const id = ($('f-id') as HTMLInputElement).value;
       const name = ($('f-name') as HTMLInputElement).value.trim();
       if (!name) {
-        flash(t(locale, 'admin.templates.field.name') + ' *', false);
+        setMetaNameError(t(locale, 'admin.form.err.required'));
+        flashForm(t(locale, 'admin.form.err.fix'), false);
+        ($('f-name') as HTMLInputElement).focus();
         return;
       }
       // Block only on hard config errors (type/range/enum); missing recommended IDs are
       // allowed (they fall back to .env at runtime). Per-field notes are painted here.
       const { hard } = validateConfigs();
       if (hard > 0) {
-        flash(t(locale, 'admin.cfg.err.summary', { count: String(hard) }), false);
+        flashForm(t(locale, 'admin.cfg.err.summary', { count: String(hard) }), false);
         return;
       }
       const payload = {
@@ -747,8 +791,8 @@ const locale: Locale = resolveLocale(
       };
       // A PAL warning is non-fatal (the template still saved) but needs attention.
       const savedFlash = (msgKey: string, palWarning?: string) => {
-        if (palWarning) flash(t(locale, msgKey) + ' ⚠ ' + palWarning, false);
-        else flash(t(locale, msgKey));
+        if (palWarning) flashForm(t(locale, msgKey) + ' ⚠ ' + palWarning, false);
+        else flashForm(t(locale, msgKey));
       };
       try {
         if (id) {
@@ -788,7 +832,7 @@ const locale: Locale = resolveLocale(
           if (created && created.id) openEdit(created.id);
         }
       } catch (e: any) {
-        flash(e.message, false);
+        flashForm(e.message, false);
       }
     }
     ($('btn-save') as HTMLButtonElement).onclick = saveTemplate;
@@ -827,6 +871,8 @@ const locale: Locale = resolveLocale(
     ($('btn-cancel') as HTMLButtonElement).onclick = () => {
       $('editor').hidden = true;
       clearFlash();
+      clearForm();
+      clearMetaNameError();
     };
 
     loadList();

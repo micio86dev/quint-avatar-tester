@@ -25,14 +25,17 @@ export type ProviderState =
 
 export type ProviderEvent = 'transcript' | 'state' | 'error';
 
-// HeyGen FULL mode has no tool-calling, so the avatar signals "question done" by SPEAKING
-// a fixed closing phrase: the server appends an instruction to say it verbatim, and the
-// client detects it in the avatar transcript to emit 'complete' (Tavus uses the silent
-// end_interview tool instead). Shared here so both sides stay in sync.
-export const HEYGEN_END_PHRASE = 'Passiamo alla prossima domanda.';
+// Both providers signal "interview done" by SPEAKING a fixed closing phrase once: the
+// server appends an instruction to say it verbatim, and each provider client detects it in
+// the avatar transcript to emit 'complete'. (HeyGen FULL mode has no tool-calling, and the
+// Tavus end_interview tool was never actually registered — so a spoken sentinel is the one
+// mechanism that works on both.) Shared here so every side stays in sync.
+export const HEYGEN_END_PHRASE = 'L’intervista è conclusa, grazie.';
 
-// Accent/case/punctuation-insensitive containment check, so minor TTS/transcription
-// variance in the spoken closing phrase still matches.
+// Accent/case/punctuation-insensitive check that the utterance ENDS with the closing
+// sentinel. endsWith (not includes) tolerates a spoken prefix ("Bene, l'intervista è
+// conclusa, grazie") and TTS/transcription variance, while refusing to fire when the phrase
+// merely appears mid-sentence — which would wrongly end the interview early.
 export function matchesEndPhrase(text: string): boolean {
   const norm = (s: string): string =>
     s
@@ -42,7 +45,7 @@ export function matchesEndPhrase(text: string): boolean {
       .replace(/[^a-z0-9 ]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  return norm(text).includes(norm(HEYGEN_END_PHRASE));
+  return norm(text).endsWith(norm(HEYGEN_END_PHRASE));
 }
 
 // Whatever the /api/interview/start endpoint returned for this provider, plus the DB

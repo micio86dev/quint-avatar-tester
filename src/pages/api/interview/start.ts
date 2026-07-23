@@ -260,9 +260,28 @@ async function startHeygen(req: StartRequest): Promise<Response> {
       avatar_persona: avatarPersona,
     }),
   });
-  const payload = await tokenRes.json().catch(() => null);
-  if (!tokenRes.ok) throw new Error(`LiveAvatar rejected the token request (HTTP ${tokenRes.status}).`);
-  const data = payload?.data ?? {};
+  // Read the body as text once, then try to parse JSON — so a non-JSON error page (gateway
+  // timeout, HTML) still surfaces its raw text instead of collapsing to a blind status code.
+  const bodyText = await tokenRes.text();
+  let payload: { data?: Record<string, unknown>; message?: string; error?: string } | null = null;
+  try {
+    payload = bodyText ? JSON.parse(bodyText) : null;
+  } catch {
+    /* non-JSON body — fall back to the raw text below */
+  }
+  if (!tokenRes.ok) {
+    // Surface LiveAvatar's actual complaint instead of a blind status code — a 400 here is
+    // almost always a rejected field (avatar_id/voice_id/duration), and the body says which.
+    const raw =
+      payload?.message ??
+      payload?.error ??
+      (payload?.data as { message?: string } | undefined)?.message ??
+      bodyText.trim() ??
+      '';
+    const detail = raw ? raw.slice(0, 300) : `HTTP ${tokenRes.status}`;
+    throw new Error(`LiveAvatar rejected the token request: ${detail}`);
+  }
+  const data = (payload?.data ?? {}) as Record<string, string | undefined>;
   if (!data.session_token) throw new Error('LiveAvatar returned no session_token.');
 
   const providerSessionId: string | null = data.session_id ?? null;
@@ -432,6 +451,8 @@ async function startTavus(req: StartRequest): Promise<Response> {
     provider: 'tavus',
     conversationUrl,
     providerSessionId: conversationId,
+    // Surface audio-only so the client can swap the (green, track-less) video for a visualizer.
+    audioOnly: bool(req.config, 'audioOnly') ?? false,
     ...meta(req),
   });
 }

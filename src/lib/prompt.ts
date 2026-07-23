@@ -21,18 +21,12 @@ export interface InterviewPromptParams {
   maxSeconds: number; // resolved session cap, surfaced to keep the avatar on pace
 }
 
-// Tavus-only: at the very end of the WHOLE interview the persona calls the end_interview
-// tool (registered once on the PAL). It reaches the client as a conversation.tool_call
-// app-message and drives the soft auto-advance. HeyGen has no equivalent hook.
-const TAVUS_END_TOOL_INSTRUCTION =
-  '\n\nQuando hai coperto l’ULTIMA domanda dell’intervista, dopo la tua breve frase ' +
-  'di conclusione chiama SUBITO lo strumento end_interview per segnalare che hai finito. ' +
-  'Non annunciarlo: chiamalo in silenzio. Chiamalo una sola volta, solo alla fine.';
-
-// HeyGen FULL mode has no tool-calling, so completion is signalled by SPEAKING a fixed
-// phrase ONCE, only after the last question is covered. The client (heygen.ts
-// matchesEndPhrase) detects it and drives the auto-advance.
-const HEYGEN_END_PHRASE_INSTRUCTION =
+// Completion is signalled the same way for BOTH providers: the avatar SPEAKS a fixed
+// closing phrase ONCE, only after the last question is covered. The client detects it in
+// the avatar transcript (matchesEndPhrase) and auto-ends the session. HeyGen FULL mode has
+// no tool-calling, and Tavus never had the end_interview tool actually registered on the
+// persona — so a spoken sentinel is the one mechanism that works on both.
+const END_PHRASE_INSTRUCTION =
   '\n\nQuando hai coperto l’ULTIMA domanda dell’intervista, dopo la tua breve frase ' +
   `di conclusione pronuncia ESATTAMENTE, parola per parola, questa frase finale e poi fermati: "${HEYGEN_END_PHRASE}"`;
 
@@ -68,7 +62,7 @@ export function composeInterviewPrompt(params: InterviewPromptParams): {
   systemPrompt: string;
   greeting: string;
 } {
-  const { promptBody, greeting, questions, provider, maxSeconds } = params;
+  const { promptBody, greeting, questions, maxSeconds } = params;
 
   const lines: string[] = [promptBody, '', 'Domande dell’intervista (in questo ordine):'];
 
@@ -89,9 +83,8 @@ export function composeInterviewPrompt(params: InterviewPromptParams): {
     `Hai a disposizione circa ${mmss(maxSeconds)} in totale: gestisci il tempo, vai al punto e non divagare.`,
   );
 
-  let systemPrompt = lines.join('\n');
-  systemPrompt +=
-    provider === 'heygen' ? HEYGEN_END_PHRASE_INSTRUCTION : TAVUS_END_TOOL_INSTRUCTION;
+  // Same spoken-sentinel completion mechanism for both providers (see END_PHRASE_INSTRUCTION).
+  const systemPrompt = lines.join('\n') + END_PHRASE_INSTRUCTION;
 
   return { systemPrompt, greeting };
 }

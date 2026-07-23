@@ -100,6 +100,10 @@
   textarea.input {
     @apply min-h-28 resize-y leading-relaxed;
   }
+  /* Invalid field cue — toggled via aria-invalid so it stays accessible. */
+  .input[aria-invalid='true'] {
+    @apply border-danger focus:border-danger;
+  }
 
   .card {
     @apply rounded-lg border border-border bg-surface;

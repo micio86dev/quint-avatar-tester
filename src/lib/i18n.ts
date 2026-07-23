@@ -229,6 +229,9 @@ const it: Dict = {
   'admin.cfg.err.range': 'Valore fuori intervallo (da {min} a {max}).',
   'admin.cfg.err.enum': 'Scegli un valore dalla lista.',
   'admin.cfg.err.summary': 'Ci sono {count} campi da correggere nella configurazione.',
+  // Generic form validation
+  'admin.form.err.required': 'Campo obbligatorio.',
+  'admin.form.err.fix': 'Correggi i campi evidenziati.',
 
   // Sessions page
   'admin.sessions.title': 'Sessioni',
@@ -269,7 +272,12 @@ const it: Dict = {
   'interview.error.no_config': 'Crea prima un prompt e un template in /admin.',
   'interview.error.select_all': 'Seleziona un prompt, un template e accetta per continuare.',
   'interview.error.mic_denied': 'permesso microfono negato',
+  'interview.error.devices_denied': 'Permesso webcam o microfono negato. Controlla i permessi del browser.',
   'interview.error.provider_busy': 'Provider occupato. Riprova tra qualche secondo.',
+  'interview.preview.title': 'Controlla webcam e microfono',
+  'interview.preview.hint': 'Assicurati di essere ben inquadrato e che il microfono rilevi la tua voce, poi entra.',
+  'interview.preview.mic': 'Microfono',
+  'interview.preview.join': 'Entra',
   'interview.waiting.move_closer': 'Avvicinati alla webcam per iniziare',
   'interview.time_up': 'tempo scaduto',
   'interview.status.idle': 'pronto per iniziare',
@@ -305,6 +313,7 @@ const it: Dict = {
   'review.band.medium': 'medio',
   'review.band.high': 'alto',
   'review.snapshots.title': 'Snapshot webcam ({n})',
+  'review.snapshots.timed': 'Temporizzato',
   'review.transcript.empty': 'Nessuna battuta registrata.',
   'review.speaker.avatar': 'Alessandra',
   'review.speaker.you': 'Tu',
@@ -510,6 +519,9 @@ const en: Dict = {
   'admin.cfg.err.range': 'Out of range (from {min} to {max}).',
   'admin.cfg.err.enum': 'Pick a value from the list.',
   'admin.cfg.err.summary': 'There are {count} fields to fix in the configuration.',
+  // Generic form validation
+  'admin.form.err.required': 'Required field.',
+  'admin.form.err.fix': 'Fix the highlighted fields.',
 
   // Sessions page
   'admin.sessions.title': 'Sessions',
@@ -550,7 +562,12 @@ const en: Dict = {
   'interview.error.no_config': 'Create a prompt and a template in /admin first.',
   'interview.error.select_all': 'Select a prompt, a template, and accept to continue.',
   'interview.error.mic_denied': 'microphone permission denied',
+  'interview.error.devices_denied': 'Webcam or microphone permission denied. Check your browser permissions.',
   'interview.error.provider_busy': 'Provider busy. Try again in a few seconds.',
+  'interview.preview.title': 'Check your webcam and mic',
+  'interview.preview.hint': 'Make sure you are well framed and the mic picks up your voice, then join.',
+  'interview.preview.mic': 'Microphone',
+  'interview.preview.join': 'Join',
   'interview.waiting.move_closer': 'Move closer to the webcam to begin',
   'interview.time_up': 'time is up',
   'interview.status.idle': 'ready to start',

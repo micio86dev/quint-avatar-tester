@@ -8,12 +8,13 @@ import Daily, {
   type DailyEventObjectAppMessage,
   type DailyEventObjectTrack,
 } from '@daily-co/daily-js';
-import type {
-  InterviewProvider,
-  ProviderEvent,
-  StartConfig,
-  StartResult,
-  TranscriptEntry,
+import {
+  matchesEndPhrase,
+  type InterviewProvider,
+  type ProviderEvent,
+  type StartConfig,
+  type StartResult,
+  type TranscriptEntry,
 } from './types';
 
 type Handler = (payload: unknown) => void;
@@ -29,6 +30,10 @@ export class TavusProvider implements InterviewProvider {
   private videoEl: HTMLVideoElement | null = null;
   private stream: MediaStream | null = null;
   private handlers: Record<ProviderEvent, Handler[]> = { transcript: [], state: [], error: [] };
+  // Completion is detected from the avatar's spoken closing sentinel (same as HeyGen). If it
+  // lands mid-utterance we defer 'complete' until the replica stops speaking.
+  private replicaSpeaking = false;
+  private pendingComplete = false;
 
   on(evt: ProviderEvent, cb: Handler): void {
     this.handlers[evt].push(cb);
@@ -85,14 +90,26 @@ export class TavusProvider implements InterviewProvider {
         const text = msg.properties?.speech?.trim();
         if (text) {
           this.emit('transcript', { role, text, ts: Date.now(), seq: msg.seq } satisfies TranscriptEntry);
+          // Avatar spoke the closing sentinel → interview is over. Defer until it finishes
+          // speaking so the final line isn't cut off; fire now if it's already idle.
+          if (role === 'avatar' && matchesEndPhrase(text)) {
+            if (this.replicaSpeaking) this.pendingComplete = true;
+            else this.emit('state', 'complete');
+          }
         }
         break;
       }
       case 'conversation.replica.started_speaking':
+        this.replicaSpeaking = true;
         this.emit('state', 'speaking');
         break;
       case 'conversation.replica.stopped_speaking':
+        this.replicaSpeaking = false;
         this.emit('state', 'ready');
+        if (this.pendingComplete) {
+          this.pendingComplete = false;
+          this.emit('state', 'complete');
+        }
         break;
       case 'conversation.user.started_speaking':
         this.emit('state', 'listening');
@@ -101,10 +118,8 @@ export class TavusProvider implements InterviewProvider {
         this.emit('state', 'ready');
         break;
       case 'conversation.tool_call':
-        // The persona calls the end_interview tool right after its closing phrase, so
-        // this is the explicit "this question is done" signal (see start.ts context).
-        // Debug line: confirms whether the hosted LLM actually fires the tool.
-        console.log('[tavus] tool_call:', msg.properties?.name);
+        // Fallback path: if an end_interview tool ever gets registered on the persona, honor
+        // it too. Primary completion now rides on the spoken sentinel above.
         if (msg.properties?.name === 'end_interview') this.emit('state', 'complete');
         break;
     }

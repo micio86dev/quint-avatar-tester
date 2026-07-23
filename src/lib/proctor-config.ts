@@ -67,12 +67,18 @@ export const LOOK_AWAY_MS = 2_500; // head off-axis this long → looking_away
 export const LOOK_AWAY_YAW_DEG = 25; // |yaw| beyond this = looking away
 export const LOOK_AWAY_PITCH_DEG = 22; // |pitch| beyond this = looking away
 export const LOOK_DOWN_PITCH_DEG = 20; // negative pitch below this (downward tilt) = looking_down
-export const FACE_MIN_WIDTH_RATIO = 0.20; // face bbox width (0–1 normalized) below this = too_far
-export const TOO_FAR_MS = 3_000; // face too small this long → too_far event
+export const FACE_MIN_WIDTH_RATIO = 0.14; // fallback face bbox width (0–1) below this = too_far
+export const TOO_FAR_MS = 4_000; // face too small this long → too_far event
+// Adaptive too_far: at session start we measure the operator's own face width for a moment
+// and then flag too_far only when it drops below this fraction of that personal baseline —
+// far more precise than a single fixed ratio that never matches every camera/face/seating.
+export const TOO_FAR_BASELINE_RATIO = 0.62; // width below 62% of baseline = too far
+export const CALIBRATION_SAMPLES = 12; // single-face frames averaged into the baseline
 
 export const PHONE_SAMPLE_MS = 2_000;     // run object detection every 2s (CPU-light cadence)
-export const PHONE_DETECTED_MS = 3_000;  // phone visible this long → phone_detected event
-export const PHONE_SCORE_THRESHOLD = 0.5; // min confidence to count as "cell phone"
+export const PHONE_DETECTED_MS = 6_000;  // phone visible this long → phone_detected event
+export const PHONE_SCORE_THRESHOLD = 0.62; // min confidence to count as "cell phone"
+export const PHONE_MIN_BOX_AREA = 0.012; // detection box must cover ≥1.2% of frame (reject specks)
 
 export const SNAPSHOT_INTERVAL_MS = 10_000; // periodic webcam capture — one frame every 10s
 export const VOICE_RMS_THRESHOLD = 0.04; // mic RMS above this = voice activity

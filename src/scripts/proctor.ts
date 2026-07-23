@@ -9,6 +9,7 @@
 // Webcam access lights the browser's unsuppressable camera indicator by design; that is
 // why the candidate also sees a self-view and consents up front.
 import {
+  CALIBRATION_SAMPLES,
   FACE_ABSENT_MS,
   FACE_MIN_WIDTH_RATIO,
   FLUSH_INTERVAL_MS,
@@ -20,11 +21,13 @@ import {
   MIN_BROWSER_EPISODE_MS,
   MULTI_FACE_MS,
   PHONE_DETECTED_MS,
+  PHONE_MIN_BOX_AREA,
   PHONE_SAMPLE_MS,
   PHONE_SCORE_THRESHOLD,
   SAMPLE_FPS,
   SECOND_VOICE_MS,
   SNAPSHOT_INTERVAL_MS,
+  TOO_FAR_BASELINE_RATIO,
   TOO_FAR_MS,
   VOICE_RMS_THRESHOLD,
   type IntegrityEventInput,
@@ -43,7 +46,10 @@ interface FaceLandmarkerLike {
   close(): void;
 }
 interface PhoneDetectionResult {
-  detections: Array<{ categories: Array<{ categoryName: string; score: number }> }>;
+  detections: Array<{
+    categories: Array<{ categoryName: string; score: number }>;
+    boundingBox?: { originX: number; originY: number; width: number; height: number };
+  }>;
 }
 interface ObjectDetectorLike {
   detectForVideo(video: HTMLVideoElement, ts: number): PhoneDetectionResult;
@@ -102,6 +108,10 @@ let lookDownEp: Ep = null; // looking_down
 let tooFarEp: Ep = null; // too_far
 let phoneEp: Ep = null; // phone_detected
 let lastPose: { yaw: number; pitch: number } | null = null;
+// Adaptive too_far calibration: collect the operator's face width over the first few valid
+// frames, then judge distance against that personal baseline instead of a fixed ratio.
+let baselineFaceWidth = 0;
+let calibWidths: number[] = [];
 
 function now(): number {
   return Date.now();
@@ -299,8 +309,19 @@ function evaluateFrame(faceCount: number, pose: { yaw: number; pitch: number } |
     });
   }
 
-  // too_far — face bounding-box width below threshold; only when exactly one face detected.
-  const farAway = faceCount === 1 && faceWidth > 0 && faceWidth < FACE_MIN_WIDTH_RATIO;
+  // too_far — face bbox width below threshold; only when exactly one face is detected.
+  // Calibrate a personal baseline from the first CALIBRATION_SAMPLES valid frames, then judge
+  // against TOO_FAR_BASELINE_RATIO of it. Until calibrated, fall back to the fixed ratio.
+  if (faceCount === 1 && faceWidth > 0 && baselineFaceWidth === 0) {
+    calibWidths.push(faceWidth);
+    if (calibWidths.length >= CALIBRATION_SAMPLES) {
+      const sorted = [...calibWidths].sort((a, b) => a - b);
+      baselineFaceWidth = sorted[Math.floor(sorted.length / 2)]; // median — robust to jitter
+    }
+  }
+  const farThreshold =
+    baselineFaceWidth > 0 ? baselineFaceWidth * TOO_FAR_BASELINE_RATIO : FACE_MIN_WIDTH_RATIO;
+  const farAway = faceCount === 1 && faceWidth > 0 && faceWidth < farThreshold;
   if (farAway) {
     if (!tooFarEp) tooFarEp = { start: t };
   } else {
@@ -361,10 +382,19 @@ function ensureObjectDetector(): Promise<ObjectDetectorLike | null> {
 
 function samplePhone(): void {
   if (!objectDetector || !selfView || selfView.readyState < 2) return;
+  const frameArea = (selfView.videoWidth || 0) * (selfView.videoHeight || 0);
   try {
     const result = objectDetector.detectForVideo(selfView, performance.now());
-    // categoryAllowlist ensures every returned detection IS a cell phone — just check count.
-    if (result.detections.length > 0) {
+    // categoryAllowlist + scoreThreshold already gate on "cell phone" at ≥PHONE_SCORE_THRESHOLD.
+    // Additionally require a real-sized box: tiny detections are almost always misclassified
+    // specks, the main source of false phone alarms. If box/frame size is unknown, keep the
+    // score gate alone. The PHONE_DETECTED_MS episode then needs it sustained (~3 samples).
+    const hasPhone = result.detections.some((d) => {
+      const box = d.boundingBox;
+      if (!box || frameArea === 0) return true;
+      return (box.width * box.height) / frameArea >= PHONE_MIN_BOX_AREA;
+    });
+    if (hasPhone) {
       if (!phoneEp) phoneEp = { start: now() };
     } else {
       phoneEp = closeEpisode(phoneEp, 'phone_detected', PHONE_DETECTED_MS);
@@ -480,6 +510,8 @@ export function startProctor(id: number): void {
   active = true;
   sessionId = id;
   buffer.length = 0;
+  baselineFaceWidth = 0; // recalibrate the too_far baseline fresh each session
+  calibWidths = [];
 
   // One-shot: extended display present? (best-effort; undefined on unsupported browsers.)
   if ((screen as Screen & { isExtended?: boolean }).isExtended === true) {

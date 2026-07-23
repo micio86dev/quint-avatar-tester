@@ -44,16 +44,18 @@ const locale: Locale = resolveLocale(
 
   <section id="editor" class="card mt-8 p-6" hidden>
     <h2 id="editor-title" class="mb-5 text-lg font-semibold">{t(locale, 'admin.prompts.editor.new')}</h2>
-    <form id="form">
+    <form id="form" novalidate>
       <input type="hidden" id="f-id" />
       <div class="field">
         <label class="label" for="f-title">{t(locale, 'admin.prompts.field.title')} <span class="text-danger">*</span></label>
         <input type="text" id="f-title" class="input" required />
+        <p class="mt-1 hidden text-xs font-medium text-danger" data-error-for="f-title"></p>
       </div>
       <div class="field">
         <label class="label" for="f-body">{t(locale, 'admin.prompts.field.body')} <span class="text-danger">*</span></label>
         <textarea id="f-body" class="input" rows="8" required></textarea>
         <p class="hint">{t(locale, 'admin.prompts.field.body.hint')}</p>
+        <p class="mt-1 hidden text-xs font-medium text-danger" data-error-for="f-body"></p>
       </div>
       <div class="field">
         <label class="label" for="f-greeting">{t(locale, 'admin.prompts.field.greeting')}</label>
@@ -71,6 +73,7 @@ const locale: Locale = resolveLocale(
         <label class="label" for="f-notes">{t(locale, 'admin.prompts.field.notes')}</label>
         <textarea id="f-notes" class="input min-h-20" rows="3"></textarea>
       </div>
+      <p id="form-status" class="mb-3 hidden rounded-md px-4 py-2.5 text-sm" role="alert"></p>
       <div class="flex gap-3 pt-1">
         <button type="submit" class="btn btn-primary">{t(locale, 'action.save')}</button>
         <button type="button" id="btn-cancel" class="btn btn-ghost">{t(locale, 'action.cancel')}</button>
@@ -86,7 +89,9 @@ const locale: Locale = resolveLocale(
     const API = '/api/admin/prompts';
     const $ = (id: string) => document.getElementById(id) as HTMLElement;
     const statusEl = $('status');
+    const formStatusEl = $('form-status');
 
+    // Top status: list-context feedback (duplicate/delete) shown with the editor closed.
     function flash(msg: string, ok = true) {
       statusEl.hidden = false;
       statusEl.textContent = msg;
@@ -96,6 +101,36 @@ const locale: Locale = resolveLocale(
     }
     function clearFlash() {
       statusEl.hidden = true;
+    }
+
+    // Form status: save/validation feedback shown right next to the Save button.
+    function flashForm(msg: string, ok = true) {
+      formStatusEl.hidden = false;
+      formStatusEl.textContent = msg;
+      formStatusEl.className =
+        'mb-3 rounded-md px-4 py-2.5 text-sm ' +
+        (ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger');
+    }
+    function clearForm() {
+      formStatusEl.hidden = true;
+    }
+
+    // Per-field error notes under each input, toggled with aria-invalid for a11y.
+    const REQUIRED_FIELDS = ['f-title', 'f-body'];
+    function setFieldError(id: string, msg: string) {
+      const slot = document.querySelector<HTMLElement>('[data-error-for="' + id + '"]');
+      if (slot) {
+        slot.textContent = msg;
+        slot.classList.remove('hidden');
+      }
+      $(id)?.setAttribute('aria-invalid', 'true');
+    }
+    function clearFieldErrors() {
+      document.querySelectorAll<HTMLElement>('[data-error-for]').forEach((el) => {
+        el.textContent = '';
+        el.classList.add('hidden');
+      });
+      REQUIRED_FIELDS.forEach((id) => $(id)?.removeAttribute('aria-invalid'));
     }
 
     async function api(url: string, opts?: RequestInit) {
@@ -178,6 +213,8 @@ const locale: Locale = resolveLocale(
 
     function openNew() {
       clearFlash();
+      clearForm();
+      clearFieldErrors();
       $('editor-title').textContent = t(locale, 'admin.prompts.editor.new');
       ($('f-id') as HTMLInputElement).value = '';
       ($('form') as HTMLFormElement).reset();
@@ -188,6 +225,8 @@ const locale: Locale = resolveLocale(
 
     async function openEdit(id: number) {
       clearFlash();
+      clearForm();
+      clearFieldErrors();
       try {
         const p = await api(API + '/' + id);
         $('editor-title').textContent = t(locale, 'admin.prompts.editor.edit', { id: p.id });
@@ -235,10 +274,23 @@ const locale: Locale = resolveLocale(
 
     ($('form') as HTMLFormElement).addEventListener('submit', async (ev) => {
       ev.preventDefault();
+      clearForm();
+      clearFieldErrors();
       const id = ($('f-id') as HTMLInputElement).value;
+      const title = ($('f-title') as HTMLInputElement).value.trim();
+      const body = ($('f-body') as HTMLTextAreaElement).value;
+      // Client-side required checks, painted per field near the Save button.
+      let firstBad: string | null = null;
+      if (!title) { setFieldError('f-title', t(locale, 'admin.form.err.required')); firstBad ??= 'f-title'; }
+      if (!body.trim()) { setFieldError('f-body', t(locale, 'admin.form.err.required')); firstBad ??= 'f-body'; }
+      if (firstBad) {
+        flashForm(t(locale, 'admin.form.err.fix'), false);
+        $(firstBad).focus();
+        return;
+      }
       const payload = {
-        title: ($('f-title') as HTMLInputElement).value.trim(),
-        body: ($('f-body') as HTMLTextAreaElement).value,
+        title,
+        body,
         greeting: ($('f-greeting') as HTMLInputElement).value.trim() || null,
         language: ($('f-language') as HTMLSelectElement).value.trim() || 'it',
         notes: ($('f-notes') as HTMLTextAreaElement).value.trim() || null,
@@ -262,7 +314,7 @@ const locale: Locale = resolveLocale(
         $('editor').hidden = true;
         loadList();
       } catch (e: any) {
-        flash(e.message, false);
+        flashForm(e.message, false);
       }
     });
 
@@ -270,6 +322,8 @@ const locale: Locale = resolveLocale(
     ($('btn-cancel') as HTMLButtonElement).onclick = () => {
       $('editor').hidden = true;
       clearFlash();
+      clearForm();
+      clearFieldErrors();
     };
 
     loadList();
