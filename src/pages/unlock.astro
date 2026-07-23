@@ -19,6 +19,7 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>{t(locale, 'gate.title')} — quint-avatar-tester</title>
   </head>
   <body>
@@ -28,6 +29,7 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
     </div>
     <main class="gate">
       <form id="unlock-form" class="modal" autocomplete="on">
+        <img class="brand-logo" src="/quint-logo.png" alt="Quint" width="130" />
         <h1>{t(locale, 'gate.title')}</h1>
         <p class="hint">{t(locale, 'gate.hint')}</p>
         <input
@@ -89,9 +91,17 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
     <style>
       :root {
         color-scheme: light dark;
+        /* Quint brand accent (user-facing side). Sampled from the Quint logo. */
+        --brand: #7719af;
+        --brand-hover: #66149a;
       }
       * {
         box-sizing: border-box;
+      }
+      .brand-logo {
+        height: auto;
+        max-width: 130px;
+        margin: 0 auto 0.4rem;
       }
       body {
         margin: 0;
@@ -135,7 +145,7 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
         color: #f3f5f9;
       }
       input:focus {
-        outline: 2px solid #4c7dff;
+        outline: 2px solid var(--brand);
         border-color: transparent;
       }
       button {
@@ -144,7 +154,7 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
         font-weight: 600;
         border: 0;
         border-radius: 9px;
-        background: #4c7dff;
+        background: var(--brand);
         color: #fff;
         cursor: pointer;
       }
@@ -180,7 +190,7 @@ const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextPara
       }
       .lang[aria-pressed='true'] {
         color: #fff;
-        background: #4c7dff;
+        background: var(--brand);
       }
     </style>
   </body>

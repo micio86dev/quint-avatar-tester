@@ -68,6 +68,7 @@ function eventDetail(type: string, metaJson: string | null): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>{t(locale, 'review.title', { id })}</title>
   </head>
   <body>
@@ -146,6 +147,10 @@ function eventDetail(type: string, metaJson: string | null): string {
     </main>
 
     <style>
+      /* Quint brand accent (user-facing side). Sampled from the Quint logo. */
+      :global(:root) {
+        --brand: #7719af;
+      }
       :global(body) {
         margin: 0;
         background: #0b0c10;
@@ -172,8 +177,8 @@ function eventDetail(type: string, metaJson: string | null): string {
       .badge {
         padding: 2px 10px;
         font-weight: 700;
-        color: #04150f;
-        background: #10b981;
+        color: #fff;
+        background: var(--brand);
         border-radius: 999px;
         text-transform: uppercase;
         font-size: 0.72rem;
@@ -211,7 +216,7 @@ function eventDetail(type: string, metaJson: string | null): string {
       }
       .band-low {
         color: #04150f;
-        background: #10b981;
+        background: var(--brand);
       }
       .band-medium {
         color: #1a1400;
@@ -270,7 +275,7 @@ function eventDetail(type: string, metaJson: string | null): string {
         border: 1px solid #2a2c36;
       }
       .turn.avatar {
-        border-left: 3px solid #10b981;
+        border-left: 3px solid var(--brand);
       }
       .turn.user {
         border-left: 3px solid #4ea1ff;
