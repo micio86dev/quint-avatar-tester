@@ -34,6 +34,11 @@ export class TavusProvider implements InterviewProvider {
   // lands mid-utterance we defer 'complete' until the replica stops speaking.
   private replicaSpeaking = false;
   private pendingComplete = false;
+  // True once the replica has STARTED speaking after the sentinel was detected — i.e. the
+  // goodbye is actually being vocalized. A stopped_speaking only ends the session once this
+  // is set, so a stale stopped_speaking from the PREVIOUS sentence (which can arrive after the
+  // sentinel's early utterance transcript) can't eject the user before the goodbye is heard.
+  private goodbyeStarted = false;
   private completeTimer: ReturnType<typeof setTimeout> | null = null;
   // Opening line echoed once the replica's stream is live (avoids clipped first words that an
   // auto-spoken custom_greeting suffers during WebRTC ramp-up).
@@ -124,10 +129,12 @@ export class TavusProvider implements InterviewProvider {
         if (text) {
           this.emit('transcript', { role, text, ts: Date.now(), seq: msg.seq } satisfies TranscriptEntry);
           // Avatar spoke the closing sentinel → interview is over. NEVER end immediately: the
-          // utterance transcript can arrive before/at the start of the spoken closing line, so
-          // completing now would cut off the goodbye and eject the user. Always wait for the
-          // replica to STOP speaking; a fallback timer covers the case where the utterance is
-          // the last event and no stopped_speaking follows.
+          // utterance transcript can arrive BEFORE the replica starts vocalizing the closing
+          // line, so completing on the next stopped_speaking would fire on the PREVIOUS
+          // sentence's stop event and eject the user mid-farewell. Wait for the goodbye to
+          // actually start (goodbyeStarted, set on the next started_speaking) and only then
+          // complete on its stopped_speaking; a fallback timer covers the case where no clean
+          // start/stop pair follows the utterance.
           if (role === 'avatar' && matchesEndPhrase(text)) {
             this.pendingComplete = true;
             if (this.completeTimer == null) {
@@ -141,12 +148,16 @@ export class TavusProvider implements InterviewProvider {
       }
       case 'conversation.replica.started_speaking':
         this.replicaSpeaking = true;
+        // A fresh speaking span after the sentinel is the goodbye actually being vocalized.
+        if (this.pendingComplete) this.goodbyeStarted = true;
         this.emit('state', 'speaking');
         break;
       case 'conversation.replica.stopped_speaking':
         this.replicaSpeaking = false;
         this.emit('state', 'ready');
-        if (this.pendingComplete) this.finishComplete(); // goodbye finished → end now
+        // End only once the goodbye has actually been spoken — not on a stale stop event that
+        // precedes it. The fallback timer still closes out if no clean start/stop ever comes.
+        if (this.pendingComplete && this.goodbyeStarted) this.finishComplete();
         break;
       case 'conversation.user.started_speaking':
         this.emit('state', 'listening');
