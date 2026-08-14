@@ -20,9 +20,20 @@ const locale: Locale = resolveLocale(
       <h1 class="text-2xl font-semibold tracking-tight">{t(locale, 'admin.nav.templates')}</h1>
       <p class="mt-1 text-sm text-muted">{t(locale, 'admin.hub.templates.desc')}</p>
     </div>
-    <button type="button" id="btn-new" class="btn btn-primary shrink-0">
-      {t(locale, 'admin.templates.new')}
-    </button>
+    <div class="flex shrink-0 items-center gap-2">
+      <button type="button" id="btn-export" class="btn btn-ghost">
+        {t(locale, 'admin.templates.export')}
+      </button>
+      <button type="button" id="btn-import" class="btn btn-ghost">
+        {t(locale, 'admin.templates.import')}
+      </button>
+      <!-- The real control is the button above; the input stays hidden so the file
+           picker matches the page's button language instead of a bare browser widget. -->
+      <input type="file" id="f-import" accept="application/json,.json" class="hidden" />
+      <button type="button" id="btn-new" class="btn btn-primary">
+        {t(locale, 'admin.templates.new')}
+      </button>
+    </div>
   </div>
 
   <p id="status" class="mb-5 hidden rounded-md px-4 py-2.5 text-sm" role="status"></p>
@@ -866,6 +877,210 @@ const locale: Locale = resolveLocale(
         flash(e.message, false);
       }
     }
+
+    // ── Portable document (import / export) ──────────────────────────────────────
+    // The `beai.avatar-template/1` document moves template configuration between this
+    // project and BEAI. Export writes a file; import posts one back and reports what it
+    // did with every entry — an import that only says "done" leaves the operator to go
+    // hunting for what actually landed.
+
+    // Mirrors MAX_BODY_BYTES in the import route, so an oversized file is refused here
+    // rather than after a pointless upload.
+    const MAX_IMPORT_BYTES = 1_000_000;
+
+    async function exportTemplates() {
+      clearFlash();
+      try {
+        const res = await fetch(API + '/export', { headers: { 'Content-Type': 'application/json' } });
+        let doc: any = null;
+        try {
+          doc = await res.json();
+        } catch {
+          /* non-JSON error body */
+        }
+        if (!res.ok) throw new Error((doc && doc.error) || 'HTTP ' + res.status);
+
+        const count = Array.isArray(doc?.templates) ? doc.templates.length : 0;
+        // Only ENABLED templates travel; an empty file would look like a broken export.
+        if (!count) {
+          flash(t(locale, 'admin.templates.export.empty'), false);
+          return;
+        }
+
+        const stamp = new Date().toISOString().slice(0, 10);
+        const url = URL.createObjectURL(
+          new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' }),
+        );
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'avatar-templates-' + stamp + '.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        flash(t(locale, 'admin.templates.export.done', { count: String(count) }));
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    }
+
+    // One line per entry, in words somebody can act on: which name it landed under, or
+    // which field made it unusable. Config failures reuse the same labels and messages
+    // the editor paints, so the operator reads the field they would fix.
+    function importEntryDetail(r: any): string {
+      if (r.status === 'created') {
+        return r.renamed
+          ? t(locale, 'admin.templates.import.renamed', {
+              name: r.name,
+              requested: r.requestedName,
+            })
+          : t(locale, 'admin.templates.import.created', { name: r.name });
+      }
+      const parts: string[] = [];
+      if (Array.isArray(r.errors) && r.errors.length) {
+        for (const e of r.errors) {
+          const spec = (e.provider === 'heygen' ? HEYGEN_FIELDS : TAVUS_FIELDS).find(
+            (s) => s.key === e.key,
+          );
+          parts.push(
+            e.provider + ' · ' + (spec ? t(locale, spec.labelKey) : e.key) + ': ' +
+              errMessage(e.provider as Provider, e.key, e.code),
+          );
+        }
+      } else if (r.error) {
+        parts.push(r.error);
+      }
+      return t(locale, 'admin.templates.import.rejected', { reason: parts.join(' ') });
+    }
+
+    function showImportReport(report: any) {
+      const results: any[] = Array.isArray(report?.results) ? report.results : [];
+      const created = Number(report?.created ?? 0);
+      const rejected = Number(report?.rejected ?? 0);
+
+      const handle = openModal({
+        title: t(locale, 'admin.templates.import.title'),
+        render: (body) => {
+          const summary = document.createElement('p');
+          summary.className =
+            'rounded-md px-4 py-2.5 text-sm ' +
+            (rejected === 0 ? 'bg-success-soft text-success' : 'bg-warning/15 text-warning');
+          // Same singular/plural shape as the admin hub's item counter
+          // (`admin.hub.count` / `_one`): the key is chosen by the number, not
+          // patched into a sentence that assumes more than one of everything.
+          const counted = (key: string, n: number) =>
+            n === 1 ? t(locale, `${key}_one`) : t(locale, key, { n: String(n) });
+
+          summary.textContent =
+            counted('admin.templates.import.summary.created', created) +
+            ', ' +
+            counted('admin.templates.import.summary.rejected', rejected) +
+            '.';
+          body.appendChild(summary);
+
+          if (created > 0) {
+            const hint = document.createElement('p');
+            hint.className = 'mt-3 text-xs leading-snug text-faint';
+            hint.textContent = t(locale, 'admin.templates.import.hint');
+            body.appendChild(hint);
+          }
+
+          const list = document.createElement('ul');
+          list.className = 'mt-4 flex max-h-[50vh] flex-col gap-2 overflow-y-auto';
+          for (const r of results) {
+            const li = document.createElement('li');
+            li.className = 'list-none rounded-md border border-border px-3 py-2';
+
+            const head = document.createElement('p');
+            head.className =
+              'text-sm font-medium ' + (r.status === 'created' ? 'text-fg' : 'text-danger');
+            head.textContent = t(locale, 'admin.templates.import.entry', {
+              n: String(Number(r.index ?? 0) + 1),
+              name: r.requestedName || t(locale, 'admin.templates.field.unset'),
+            });
+
+            const detail = document.createElement('p');
+            detail.className = 'mt-0.5 text-xs leading-snug text-muted';
+            detail.textContent = importEntryDetail(r);
+
+            li.append(head, detail);
+            list.appendChild(li);
+          }
+          body.appendChild(list);
+
+          const actions = document.createElement('div');
+          actions.className = 'mt-5 flex justify-end';
+          const close = document.createElement('button');
+          close.type = 'button';
+          close.className = 'btn btn-primary';
+          close.textContent = t(locale, 'action.close');
+          close.onclick = () => handle.close();
+          actions.appendChild(close);
+          body.appendChild(actions);
+        },
+      });
+    }
+
+    const importInput = $('f-import') as HTMLInputElement;
+
+    ($('btn-export') as HTMLButtonElement).onclick = exportTemplates;
+    ($('btn-import') as HTMLButtonElement).onclick = () => {
+      // Reset first: re-picking the same file must still fire `change`.
+      importInput.value = '';
+      importInput.click();
+    };
+
+    importInput.onchange = async () => {
+      const file = importInput.files && importInput.files[0];
+      if (!file) return;
+      clearFlash();
+
+      if (file.size > MAX_IMPORT_BYTES) {
+        flash(
+          t(locale, 'admin.templates.import.too_large', {
+            max: String(Math.floor(MAX_IMPORT_BYTES / 1024)),
+          }),
+          false,
+        );
+        return;
+      }
+
+      let text: string;
+      try {
+        text = await file.text();
+      } catch {
+        flash(t(locale, 'admin.templates.import.unreadable'), false);
+        return;
+      }
+
+      // The body is posted verbatim: the server is the one that decides whether the
+      // document is valid, and parsing it here first would only invent a second opinion.
+      try {
+        const res = await fetch(API + '/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: text,
+        });
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          /* non-JSON error body */
+        }
+        // A 422 still carries the per-entry report when the document itself parsed;
+        // only an envelope-level refusal has no results to show.
+        if (data && Array.isArray(data.results)) {
+          showImportReport(data);
+          loadList();
+          return;
+        }
+        if (!res.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
+        flash(t(locale, 'admin.templates.import.unreadable'), false);
+      } catch (e: any) {
+        flash(e.message, false);
+      }
+    };
 
     ($('btn-new') as HTMLButtonElement).onclick = openNew;
     ($('btn-cancel') as HTMLButtonElement).onclick = () => {

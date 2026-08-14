@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { listTemplates } from '../../../../lib/db';
 import { guard, json, parseStoredConfig } from '../_helpers';
+import { TEMPLATE_DOCUMENT_SCHEMA, toPortableConfig } from '../../../../lib/provider-config';
 
 export const prerender = false;
 
@@ -16,12 +17,18 @@ export const prerender = false;
  * Only ENABLED templates are exported. A disabled template is one somebody
  * turned off; carrying it into another system would quietly resurrect it.
  *
- * KNOWN INCOMPATIBILITY: this project's HeyGen config may carry
- * `voiceProvider`, which BEAI's field specs do not define. BEAI refuses unknown
- * keys rather than dropping them — by design, so an import cannot silently
- * produce a template that is not the one exported. If that key matters, it has
- * to be added to BEAI's ProviderFieldSpecs; it is not stripped here, because an
- * exporter that quietly edits its own data is worse than one that is refused.
+ * Each config block is projected onto the portable key set (see
+ * `toPortableConfig`) before it leaves: a producer must not emit fields outside
+ * the schema it claims to speak, and `beai.avatar-template/1` does not define
+ * every knob this project happens to store locally. The projection drops keys
+ * from the document only — it never touches the stored row.
+ *
+ * KNOWN RESIDUAL RISK, values rather than keys: this project caps
+ * `maxSessionDurationSec` at 3600 while BEAI caps HeyGen at 1200 (its real plan
+ * ceiling). A local template above 1200 exports a key BEAI accepts carrying a
+ * value it refuses as out of range. That is a genuine disagreement about what is
+ * configurable, not a schema defect, and clamping it here would ship a template
+ * that is not the one exported.
  */
 export const GET: APIRoute = async () =>
   guard(async () => {
@@ -29,8 +36,8 @@ export const GET: APIRoute = async () =>
       .filter((row) => row.enabled === 1)
       .map((row) => {
         const configs: Record<string, unknown> = {};
-        const heygen = parseStoredConfig(row.heygen_config);
-        const tavus = parseStoredConfig(row.tavus_config);
+        const heygen = toPortableConfig('heygen', parseStoredConfig(row.heygen_config));
+        const tavus = toPortableConfig('tavus', parseStoredConfig(row.tavus_config));
 
         // Omitted rather than emitted as null: a null block would import as an
         // empty template for a provider nobody configured.
@@ -45,7 +52,7 @@ export const GET: APIRoute = async () =>
       });
 
     return json(200, {
-      schema: 'beai.avatar-template/1',
+      schema: TEMPLATE_DOCUMENT_SCHEMA,
       exported_at: new Date().toISOString(),
       source: 'quint-avatar-tester',
       templates,

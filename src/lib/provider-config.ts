@@ -74,6 +74,62 @@ export function fieldsFor(provider: Provider): readonly FieldSpec[] {
   return provider === 'heygen' ? HEYGEN_FIELDS : TAVUS_FIELDS;
 }
 
+export const PROVIDERS: readonly Provider[] = ['heygen', 'tavus'];
+
+export function isProvider(value: unknown): value is Provider {
+  return value === 'heygen' || value === 'tavus';
+}
+
+// ── Portable document projection ──────────────────────────────────────────────────
+// The versioned envelope both this project and BEAI speak. Versioned on purpose: an
+// unversioned config blob forces the importer to guess, and guessing is how a stale
+// file silently produces a template pointing at an avatar that no longer exists.
+export const TEMPLATE_DOCUMENT_SCHEMA = 'beai.avatar-template/1';
+
+
+// The `beai.avatar-template/1` document is a CONTRACT, and a producer must not emit
+// fields outside the schema it claims to speak. The receiving side (BEAI) refuses
+// unknown keys rather than dropping them — deliberately, so an import can never
+// quietly produce a template that is not the one exported — which means one stray key
+// makes the whole document unimportable.
+//
+// The portable key set is therefore "every field in the local spec, minus the keys the
+// schema does not define". Anything the local model grows that the schema does not know
+// about has to be listed here, or the export stops being importable.
+const NON_PORTABLE_KEYS: Readonly<Record<Provider, readonly string[]>> = {
+  // `voiceProvider` is collected by the form and never sent to HeyGen — a dead knob.
+  // BEAI leaves it out of its field specs for exactly that reason, so emitting it makes
+  // the document invalid there. It stays in the local model, form and validation; it
+  // simply is not part of what travels.
+  heygen: ['voiceProvider'],
+  tavus: [],
+};
+
+// Project a stored provider config onto the portable key set. Returns null when the
+// value is not an object or when nothing portable survives — an empty block would import
+// as a template for a provider nobody configured.
+export function toPortableConfig(
+  provider: Provider,
+  stored: unknown,
+): Record<string, unknown> | null {
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return null;
+
+  const excluded = new Set(NON_PORTABLE_KEYS[provider]);
+  const source = stored as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  for (const field of fieldsFor(provider)) {
+    if (excluded.has(field.key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(source, field.key)) continue;
+    const value = source[field.key];
+    // A null is "unset" locally; the schema expresses unset by absence.
+    if (value === null) continue;
+    out[field.key] = value;
+  }
+
+  return Object.keys(out).length ? out : null;
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────────
 export type ConfigErrorCode = 'required' | 'type' | 'range' | 'enum';
 export interface ConfigError {

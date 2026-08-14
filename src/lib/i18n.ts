@@ -35,6 +35,7 @@ const it: Dict = {
   'action.edit': 'Modifica',
   'action.delete': 'Elimina',
   'action.back': 'Indietro',
+  'action.close': 'Chiudi',
   'action.confirm_delete': 'Eliminare definitivamente?',
   'action.loading': 'Caricamento…',
   'action.saving': 'Salvataggio…',
@@ -158,6 +159,26 @@ const it: Dict = {
   'admin.templates.cfg.ok': 'Config OK',
   'admin.templates.cfg.incomplete': 'Config incompleta',
   'admin.templates.cfg.errors': 'Config con errori',
+  // Import / export (documento portabile condiviso con BEAI)
+  'admin.templates.export': 'Esporta',
+  'admin.templates.import': 'Importa',
+  'admin.templates.export.done': 'Esportati {count} template attivi.',
+  'admin.templates.export.empty': 'Nessun template attivo da esportare: l’export include solo i template attivi.',
+  'admin.templates.import.title': 'Esito importazione',
+  // Two independently-counted fragments rather than one sentence: pluralising the
+  // whole sentence would need a key per (created, rejected) combination, and the
+  // very first real import is "1 created, 1 rejected" — the case that reads wrong.
+  'admin.templates.import.summary.created': '{n} template creati',
+  'admin.templates.import.summary.created_one': '1 template creato',
+  'admin.templates.import.summary.rejected': '{n} scartati',
+  'admin.templates.import.summary.rejected_one': '1 scartato',
+  'admin.templates.import.hint': 'I template importati arrivano disattivati: aprili, controlla la configurazione e attivali quando sei pronto.',
+  'admin.templates.import.entry': 'Voce {n} — {name}',
+  'admin.templates.import.created': 'Creato come «{name}».',
+  'admin.templates.import.renamed': 'Creato come «{name}»: esisteva già un template chiamato «{requested}», che non è stato toccato.',
+  'admin.templates.import.rejected': 'Scartato — {reason}',
+  'admin.templates.import.too_large': 'File troppo grande (massimo {max} KB).',
+  'admin.templates.import.unreadable': 'Impossibile leggere il file selezionato.',
 
   // Provider config field labels + non-technical hints (option VALUES stay literal — they
   // are API values). Hints explain, in plain language, what each field does and where to
@@ -344,6 +365,7 @@ const en: Dict = {
   'action.edit': 'Edit',
   'action.delete': 'Delete',
   'action.back': 'Back',
+  'action.close': 'Close',
   'action.confirm_delete': 'Delete permanently?',
   'action.loading': 'Loading…',
   'action.saving': 'Saving…',
@@ -464,6 +486,23 @@ const en: Dict = {
   'admin.templates.cfg.ok': 'Config OK',
   'admin.templates.cfg.incomplete': 'Config incomplete',
   'admin.templates.cfg.errors': 'Config has errors',
+  // Import / export (portable document shared with BEAI)
+  'admin.templates.export': 'Export',
+  'admin.templates.import': 'Import',
+  'admin.templates.export.done': 'Exported {count} enabled templates.',
+  'admin.templates.export.empty': 'No enabled template to export — the export only includes enabled templates.',
+  'admin.templates.import.title': 'Import result',
+  'admin.templates.import.summary.created': '{n} templates created',
+  'admin.templates.import.summary.created_one': '1 template created',
+  'admin.templates.import.summary.rejected': '{n} rejected',
+  'admin.templates.import.summary.rejected_one': '1 rejected',
+  'admin.templates.import.hint': 'Imported templates arrive disabled: open them, check the configuration, and enable them when you are ready.',
+  'admin.templates.import.entry': 'Entry {n} — {name}',
+  'admin.templates.import.created': 'Created as “{name}”.',
+  'admin.templates.import.renamed': 'Created as “{name}”: a template called “{requested}” already existed and was left untouched.',
+  'admin.templates.import.rejected': 'Rejected — {reason}',
+  'admin.templates.import.too_large': 'File too large (maximum {max} KB).',
+  'admin.templates.import.unreadable': 'Could not read the selected file.',
 
   // Provider config field labels + non-technical hints (option VALUES stay literal — they
   // are API values). Hints explain, in plain language, what each field does and where to
